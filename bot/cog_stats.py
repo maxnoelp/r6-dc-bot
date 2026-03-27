@@ -245,7 +245,7 @@ class StatsCog(commands.Cog, name="Stats"):
             top_op = operator_stats[0]
             embed.add_field(
                 name="Meistgespielter Operator",
-                value=f"{top_op.name} ({top_op.kills} kills total)",
+                value=f"{top_op.name} ({top_op.roundsPlayed} Runden gespielt)",
                 inline=False,
             )
 
