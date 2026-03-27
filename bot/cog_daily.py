@@ -393,6 +393,60 @@ class DailyCog(commands.Cog, name="Daily"):
             await ctx.reply("❌ Du brauchst Administrator-Rechte für diesen Befehl.")
 
 
+    @commands.command(name="showsnapshot")
+    @commands.has_permissions(administrator=True)
+    async def showsnapshot_cmd(
+        self,
+        ctx: commands.Context,
+        member: discord.Member | None = None,
+    ) -> None:
+        """
+        Show the stored snapshot for a user (default: yourself).
+
+        Requires administrator permission.
+        Usage: !showsnapshot [@member]
+        """
+        target = member or ctx.author
+        user_record = await db.get_user(self.pool, target.id)
+
+        if user_record is None:
+            await ctx.reply(f"❌ {target.display_name} ist nicht registriert.")
+            return
+
+        today = date.today()
+        snapshot = await db.get_snapshot(self.pool, target.id, today)
+
+        if snapshot is None:
+            await ctx.reply(
+                f"📭 Kein Snapshot für **{user_record['r6_username']}** heute ({today}). "
+                "Nutze `!snapshot` um einen manuell zu erstellen."
+            )
+            return
+
+        created_at = snapshot["created_at"]
+
+        embed = discord.Embed(
+            title=f"🗄️ Snapshot: {user_record['r6_username']}",
+            color=discord.Color.blurple(),
+            timestamp=datetime.datetime.now(tz=timezone.utc),
+        )
+        embed.add_field(name="📅 Datum",       value=str(snapshot["snapshot_date"]), inline=True)
+        embed.add_field(name="🕐 Erstellt um", value=created_at.strftime("%H:%M:%S") if created_at else "—", inline=True)
+        embed.add_field(name="​",         value="", inline=False)
+        embed.add_field(name="🏆 Rang",        value=f"{snapshot['rank']} ({snapshot['rank_points']:,} RP)", inline=True)
+        embed.add_field(name="💀 Kills",       value=str(snapshot["total_kills"]),  inline=True)
+        embed.add_field(name="☠️ Deaths",      value=str(snapshot["total_deaths"]), inline=True)
+        embed.add_field(name="✅ Wins",        value=str(snapshot["total_wins"]),   inline=True)
+        embed.add_field(name="❌ Losses",      value=str(snapshot["total_losses"]), inline=True)
+        embed.set_footer(text=f"Discord ID: {target.id}")
+
+        await ctx.reply(embed=embed)
+
+    @showsnapshot_cmd.error
+    async def showsnapshot_error(self, ctx: commands.Context, error: Exception) -> None:
+        if isinstance(error, commands.MissingPermissions):
+            await ctx.reply("❌ Du brauchst Administrator-Rechte für diesen Befehl.")
+
 async def setup(bot: commands.Bot) -> None:
     """Entry point called by bot.load_extension()."""
     await bot.add_cog(DailyCog(bot))
