@@ -33,8 +33,8 @@ class Settings(BaseSettings):
     # Database (asyncpg DSN, e.g. postgresql://user:pass@host:5432/db)
     database_url: str
 
-    # Google Gemini / pydantic-ai
-    google_api_key: str
+    # Anthropic Claude / pydantic-ai
+    anthropic_api_key: str
 
     # Scheduler: when to post the daily report (24-hour clock)
     daily_hour: int = 22

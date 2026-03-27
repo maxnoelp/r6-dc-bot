@@ -1,7 +1,7 @@
 """
 agent/critic.py — pydantic-ai agents for generating player critiques.
 
-Uses Claude (claude-sonnet-4-6) via pydantic-ai.
+Uses Claude (claude-haiku-4-5-20251001) via pydantic-ai.
 
 Agents:
 - critic_agent: Takes a DailyStats object and returns a CritiqueOutput.
@@ -17,8 +17,8 @@ Models:
 
 from pydantic import BaseModel
 from pydantic_ai import Agent
-from pydantic_ai.models.google import GoogleModel
-from pydantic_ai.providers.google import GoogleProvider
+from pydantic_ai.models.anthropic import AnthropicModel
+from pydantic_ai.providers.anthropic import AnthropicProvider
 from config import settings
 
 
@@ -60,7 +60,7 @@ class LazyDayOutput(BaseModel):
 
 # Toxic R6 coach agent — roasts a player's daily stats
 critic_agent: Agent[None, CritiqueOutput] = Agent(
-    model=GoogleModel("gemini-2.0-flash", provider=GoogleProvider(api_key=settings.google_api_key)),
+    model=AnthropicModel("claude-haiku-4-5-20251001", provider=AnthropicProvider(api_key=settings.anthropic_api_key)),
     output_type=CritiqueOutput,
     system_prompt=(
         "Du bist ein toxischer Rainbow Six Siege Coach. "
@@ -78,7 +78,7 @@ critic_agent: Agent[None, CritiqueOutput] = Agent(
 
 # Lazy-day agent — generates a varied @everyone taunt when nobody played
 lazy_day_agent: Agent[None, LazyDayOutput] = Agent(
-    model=GoogleModel("gemini-2.0-flash", provider=GoogleProvider(api_key=settings.google_api_key)),
+    model=AnthropicModel("claude-haiku-4-5-20251001", provider=AnthropicProvider(api_key=settings.anthropic_api_key)),
     output_type=LazyDayOutput,
     system_prompt=(
         "Du bist ein zynischer Discord-Bot für eine Rainbow Six Siege Gruppe. "
