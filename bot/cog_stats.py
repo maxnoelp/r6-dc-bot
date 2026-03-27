@@ -278,8 +278,9 @@ class StatsCog(commands.Cog, name="Stats"):
 
         async with ctx.typing():
             try:
-                account = await self.r6.get_account_info(username, platform)
-                stats   = await self.r6.get_player_stats(username, platform)
+                account   = await self.r6.get_account_info(username, platform)
+                stats     = await self.r6.get_player_stats(username, platform)
+                operators = await self.r6.get_operator_stats(username, platform)
             except ValueError as exc:
                 await ctx.reply(f"❌ Fehler beim Abrufen der Stats: {exc}")
                 return
@@ -315,6 +316,19 @@ class StatsCog(commands.Cog, name="Stats"):
         embed.add_field(name="✅  Wins",     value=f"**{stats.wins}**",  inline=True)
         embed.add_field(name="❌  Losses",   value=f"**{stats.losses}**", inline=True)
         embed.add_field(name="📊  Win Rate", value=f"**{wl}**",          inline=True)
+
+        # ── Top Operators ────────────────────────────────────────────
+        if operators:
+            top3 = operators[:3]
+            op_lines = "\n".join(
+                f"**{i+1}. {op.name}** — {op.roundsPlayed} Runden "
+                f"({op.roundsWon}W / {op.roundsPlayed - op.roundsWon}L)"
+                for i, op in enumerate(top3)
+            )
+            embed.add_field(name="\u200b", value="", inline=False)
+            embed.add_field(name="🎭  Top Operators", value=op_lines, inline=False)
+            # Show most played operator's icon as embed image
+            embed.set_image(url=top3[0].iconUrl)
 
         embed.set_footer(text=f"{total} Matches diese Season")
 

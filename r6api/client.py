@@ -79,8 +79,9 @@ class PlayerStats(BaseModel):
 
 class OperatorStat(BaseModel):
     name: str
-    kills: int
     roundsPlayed: int
+    roundsWon: int
+    iconUrl: str
 
 
 # ---------------------------------------------------------------------------
@@ -201,36 +202,43 @@ class R6DataClient:
 
     async def get_operator_stats(self, username: str, platform: str = "uplay") -> list[OperatorStat]:
         platform = _normalise_platform(platform)
+        family = _PLATFORM_FAMILIES.get(platform, "pc")
         data = await self._get(
             "/api/stats",
             params={
                 "type": "operatorStats",
                 "nameOnPlatform": username,
                 "platformType": platform,
-                "platform_families": _PLATFORM_FAMILIES.get(platform, "pc"),
+                "platform_families": family,
             },
         )
-        log.debug("operatorStats raw: %s", str(data)[:1000])
 
-        if isinstance(data, list):
-            operators_raw = data
-        elif isinstance(data, dict):
-            operators_raw = data.get("operators", data.get("operatorStats", []))
-        else:
+        if not isinstance(data, dict):
             return []
 
-        result: list[OperatorStat] = []
-        for op in operators_raw:
-            try:
-                result.append(
-                    OperatorStat(
-                        name=str(op.get("name", op.get("operatorName", "Unknown"))),
-                        kills=int(op.get("kills", 0)),
-                        roundsPlayed=int(op.get("roundsPlayed", op.get("roundsWon", 0))),
-                    )
-                )
-            except (KeyError, TypeError):
-                continue
+        # Merge lifetime rounds across all playlists per operator
+        playlists: dict = data.get("split", {}).get(family, {}).get("playlists", {})
+        merged: dict[str, dict] = {}
+        for playlist_data in playlists.values():
+            for op_data in playlist_data.get("operators", {}).values():
+                name = op_data.get("operator", "Unknown")
+                played = int(op_data["rounds"]["lifetime"].get("played", 0))
+                won    = int(op_data["rounds"]["lifetime"].get("won", 0))
+                if name not in merged:
+                    merged[name] = {"played": 0, "won": 0}
+                # Take max across playlists (avoids double-counting)
+                merged[name]["played"] = max(merged[name]["played"], played)
+                merged[name]["won"]    = max(merged[name]["won"], won)
 
+        result: list[OperatorStat] = [
+            OperatorStat(
+                name=name,
+                roundsPlayed=stats["played"],
+                roundsWon=stats["won"],
+                iconUrl=f"https://r6data.eu/assets/img/operators/{name.lower()}.png",
+            )
+            for name, stats in merged.items()
+            if stats["played"] > 0
+        ]
         result.sort(key=lambda o: o.roundsPlayed, reverse=True)
         return result
