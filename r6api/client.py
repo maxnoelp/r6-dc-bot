@@ -11,6 +11,7 @@ Endpoints used:
 """
 
 import logging
+import urllib.parse
 import httpx
 from pydantic import BaseModel
 
@@ -235,7 +236,7 @@ class R6DataClient:
                 name=name,
                 roundsPlayed=stats["played"],
                 roundsWon=stats["won"],
-                iconUrl=f"https://r6data.eu/assets/img/operators/{name.lower()}.png",
+                iconUrl=f"https://r6data.eu/assets/img/operators/{urllib.parse.quote(name.lower())}.png",
             )
             for name, stats in merged.items()
             if stats["played"] > 0
