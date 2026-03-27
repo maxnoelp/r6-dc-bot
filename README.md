@@ -17,6 +17,7 @@ Built with **pydantic-ai + Google Gemini**, **discord.py**, **PostgreSQL**, and 
 - **`!stats`** — mid-day delta since the midnight snapshot
 - **`!snapshot`** — admin command to manually save a baseline snapshot
 - **`!report`** — admin command to trigger the full report immediately
+- **`!showsnapshot`** — admin command to inspect the stored snapshot for any registered user (shows date, time, rank, kills, deaths, wins, losses)
 - **`!info`** — posts a styled help embed in the command channel
 
 ---
@@ -206,6 +207,7 @@ Then register your account:
 | `!setup #post #commands` | Admin | Set the channel for daily reports and the channel for commands. |
 | `!snapshot` | Admin | Manually save a baseline snapshot for all users right now. |
 | `!report` | Admin | Manually trigger the full 22:00 report right now. |
+| `!showsnapshot [@user]` | Admin | Show the stored snapshot for a user: creation time, rank, kills, deaths, wins, losses. |
 
 > Commands sent outside the configured command channel are silently ignored. Before `!setup` is run, all channels are accepted.
 
@@ -282,6 +284,8 @@ All stats are fetched from `https://api.r6data.eu` with the `api-key` header. Th
 | `GET /api/stats?type=operatorStats` | Per-operator lifetime rounds across all playlists |
 | `GET /api/operators?name=<name>` | Operator metadata including `icon_url` |
 
+> Operator names containing non-ASCII characters (e.g. **Jäger**) are percent-encoded via `urllib.parse.quote()` before being embedded in image URLs.
+
 All three stats endpoints require `nameOnPlatform`, `platformType`, and `platform_families` parameters.
 
 ### Rank System
@@ -309,7 +313,7 @@ APScheduler runs with `timezone="Europe/Berlin"`. `DAILY_HOUR=22` means 22:00 CE
 ## Limitations
 
 - **No match history** — the R6Data API only exposes cumulative season stats. Individual match scores and round-by-round data are not available.
-- **Operator delta is approximate** — operator stats are lifetime totals, not per-day. The daily report picks the top operator by current total rounds, not exclusively today's games.
+- **Operator stats are cumulative** — operator stats are lifetime totals, not per-day. Both `!stats` and `!season` show the top operator by total rounds played, not exclusively today's games.
 - **Seasonal data only** — stats reset each season. At season start, deltas will be 0 until the snapshot catches up.
 - **Single guild per user** — if the same Discord user is in multiple guilds where the bot is active, they receive one ping per guild's post channel.
 
