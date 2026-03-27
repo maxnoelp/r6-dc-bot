@@ -328,7 +328,9 @@ class StatsCog(commands.Cog, name="Stats"):
             embed.add_field(name="\u200b", value="", inline=False)
             embed.add_field(name="🎭  Top Operators", value=op_lines, inline=False)
             # Show most played operator's icon as embed image
-            embed.set_image(url=top3[0].iconUrl)
+            icon = top3[0].iconUrl
+            if icon and icon.startswith(('http://', 'https://')):
+                embed.set_image(url=icon)
 
         embed.set_footer(text=f"{total} Matches diese Season")
 
