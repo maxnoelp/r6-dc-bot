@@ -18,6 +18,7 @@ from __future__ import annotations
 import datetime
 import logging
 from datetime import date, timezone
+from zoneinfo import ZoneInfo
 
 import discord
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -35,6 +36,13 @@ from db import models as db
 from r6api.client import R6DataClient
 
 log = logging.getLogger(__name__)
+
+_BERLIN = ZoneInfo("Europe/Berlin")
+
+
+def _today_berlin() -> date:
+    """Return the current calendar date in Europe/Berlin timezone."""
+    return datetime.datetime.now(tz=_BERLIN).date()
 
 
 def _kd(kills: int, deaths: int) -> float:
@@ -122,7 +130,7 @@ class DailyCog(commands.Cog, name="Daily"):
         """
         log.info("snapshot_job: starting")
         users = await db.get_all_users(self.pool)
-        today = date.today()
+        today = _today_berlin()
 
         for user in users:
             username: str  = user["r6_username"]
@@ -147,12 +155,12 @@ class DailyCog(commands.Cog, name="Daily"):
 
         log.info("snapshot_job: done (%d users)", len(users))
 
-    async def daily_report_job(self) -> None:
+    async def daily_report_job(self, snapshot_date: date | None = None) -> None:
         """
         Daily report job — runs at DAILY_HOUR:DAILY_MINUTE (default 22:00).
 
         For each tracked user:
-          1. Load today's baseline snapshot.
+          1. Load baseline snapshot (latest, or specific date if snapshot_date given).
           2. Fetch current live stats from the R6Data API.
           3. Compute delta (kills, deaths, wins, losses, rank points).
           4. Determine most-played operator by current season ranking.
@@ -163,9 +171,8 @@ class DailyCog(commands.Cog, name="Daily"):
           - Otherwise: send each critique embed to all configured post channels,
             pinging the respective Discord user.
         """
-        log.info("daily_report_job: starting")
+        log.info("daily_report_job: starting (snapshot_date=%s)", snapshot_date or "latest")
         users = await db.get_all_users(self.pool)
-        today = date.today()
 
         # Accumulate (discord_id, username, embed, ping) tuples for posting
         posts: list[tuple[int, str, discord.Embed, str]] = []
@@ -175,9 +182,12 @@ class DailyCog(commands.Cog, name="Daily"):
             username: str   = user["r6_username"]
             platform: str   = user["platform"]
 
-            snapshot = await db.get_snapshot(self.pool, discord_id, today)
+            if snapshot_date is not None:
+                snapshot = await db.get_snapshot(self.pool, discord_id, snapshot_date)
+            else:
+                snapshot = await db.get_latest_snapshot(self.pool, discord_id)
             if snapshot is None:
-                log.warning("daily_report_job: no snapshot for %s, skipping", username)
+                log.info("daily_report_job: no snapshot yet for %s (new user), skipping", username)
                 continue
 
             try:
@@ -202,8 +212,8 @@ class DailyCog(commands.Cog, name="Daily"):
 
             # Most-played operator: use the top operator by roundsPlayed
             # (get_operator_stats already sorts by roundsPlayed desc)
-            most_played  = op_stats[0].name  if op_stats else "Unbekannt"
-            op_kills_day = op_stats[0].kills if op_stats else 0
+            most_played   = op_stats[0].name         if op_stats else "Unbekannt"
+            op_rounds_day = op_stats[0].roundsPlayed if op_stats else 0
 
             daily_stats = DailyStats(
                 username=username,
@@ -216,7 +226,7 @@ class DailyCog(commands.Cog, name="Daily"):
                 wins=win_delta,
                 losses=loss_delta,
                 most_played_operator=most_played,
-                operator_kills=op_kills_day,
+                operator_rounds=op_rounds_day,
             )
 
             # Ask the pydantic-ai critic agent to roast this player
@@ -333,7 +343,7 @@ class DailyCog(commands.Cog, name="Daily"):
         )
         embed.add_field(
             name="Operator",
-            value=f"{stats.most_played_operator} ({stats.operator_kills} kills)",
+            value=f"{stats.most_played_operator} ({stats.operator_rounds} Runden)",
             inline=True,
         )
         embed.add_field(
@@ -372,16 +382,25 @@ class DailyCog(commands.Cog, name="Daily"):
 
     @commands.command(name="report")
     @commands.has_permissions(administrator=True)
-    async def report_cmd(self, ctx: commands.Context) -> None:
+    async def report_cmd(self, ctx: commands.Context, offset: int = 0) -> None:
         """
         Manually trigger the daily report job right now.
 
         Requires administrator permission.
-        Usage: !report
+        Usage: !report        — use latest snapshot
+               !report -1     — use snapshot from yesterday as baseline
+               !report -2     — use snapshot from 2 days ago as baseline
         """
-        await ctx.reply("⏳ Starte manuellen Report...")
+        if offset == 0:
+            snapshot_date = None
+            date_hint = "neuester Snapshot"
+        else:
+            snapshot_date = _today_berlin() + datetime.timedelta(days=offset)
+            date_hint = str(snapshot_date)
+
+        await ctx.reply(f"⏳ Starte manuellen Report... (Baseline: {date_hint})")
         try:
-            await self.daily_report_job()
+            await self.daily_report_job(snapshot_date=snapshot_date)
             await ctx.reply("✅ Report abgeschlossen.")
         except Exception as exc:  # noqa: BLE001
             log.error("!report command error: %s", exc)
@@ -399,12 +418,15 @@ class DailyCog(commands.Cog, name="Daily"):
         self,
         ctx: commands.Context,
         member: discord.Member | None = None,
+        offset: int = 0,
     ) -> None:
         """
-        Show the stored snapshot for a user (default: yourself).
+        Show the stored snapshot for a user (default: yourself, latest snapshot).
 
         Requires administrator permission.
-        Usage: !showsnapshot [@member]
+        Usage: !showsnapshot              — your latest snapshot
+               !showsnapshot -1           — snapshot from yesterday
+               !showsnapshot @member -2   — snapshot from 2 days ago for another user
         """
         target = member or ctx.author
         user_record = await db.get_user(self.pool, target.id)
@@ -413,12 +435,16 @@ class DailyCog(commands.Cog, name="Daily"):
             await ctx.reply(f"❌ {target.display_name} ist nicht registriert.")
             return
 
-        today = date.today()
-        snapshot = await db.get_snapshot(self.pool, target.id, today)
+        if offset == 0:
+            snapshot = await db.get_latest_snapshot(self.pool, target.id)
+        else:
+            lookup_date = _today_berlin() + datetime.timedelta(days=offset)
+            snapshot = await db.get_snapshot(self.pool, target.id, lookup_date)
 
         if snapshot is None:
+            hint = f"vom {_today_berlin() + datetime.timedelta(days=offset)}" if offset != 0 else ""
             await ctx.reply(
-                f"📭 Kein Snapshot für **{user_record['r6_username']}** heute ({today}). "
+                f"📭 Kein Snapshot {hint} für **{user_record['r6_username']}** vorhanden. "
                 "Nutze `!snapshot` um einen manuell zu erstellen."
             )
             return

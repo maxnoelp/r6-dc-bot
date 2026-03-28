@@ -170,3 +170,23 @@ async def get_snapshot(
         discord_id,
         snapshot_date,
     )
+
+
+async def get_latest_snapshot(
+    pool: asyncpg.Pool, discord_id: int
+) -> Optional[asyncpg.Record]:
+    """
+    Fetch the most recent snapshot for a player regardless of date.
+
+    Returns:
+        The newest asyncpg.Record or None if the player has no snapshots yet.
+    """
+    return await pool.fetchrow(
+        """
+        SELECT * FROM snapshots
+        WHERE discord_id = $1
+        ORDER BY snapshot_date DESC
+        LIMIT 1
+        """,
+        discord_id,
+    )
