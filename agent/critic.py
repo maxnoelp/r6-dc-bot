@@ -38,7 +38,7 @@ class DailyStats(BaseModel):
     wins: int                # Wins today
     losses: int              # Losses today
     most_played_operator: str
-    operator_kills: int      # Kills with the most-played operator today
+    operator_rounds: int     # Rounds played with the most-played operator today
 
 
 class CritiqueOutput(BaseModel):
