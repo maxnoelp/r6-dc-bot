@@ -17,10 +17,18 @@ All commands silently ignore invocations outside the configured command channel
 
 from __future__ import annotations
 
+import datetime
+from datetime import date, timezone
+from zoneinfo import ZoneInfo
+
 import discord
 from discord.ext import commands
-from datetime import date, timezone
-import datetime
+
+_BERLIN = ZoneInfo("Europe/Berlin")
+
+
+def _today_berlin() -> date:
+    return datetime.datetime.now(tz=_BERLIN).date()
 
 from db import models as db
 from r6api.client import R6DataClient
@@ -156,8 +164,13 @@ class StatsCog(commands.Cog, name="Stats"):
                 account.platformType,
             )
 
+        has_snapshot = await db.get_latest_snapshot(self.pool, ctx.author.id) is not None
+        daily_hint = (
+            "" if has_snapshot
+            else "\n📅 Dein erster Snapshot wird heute Nacht um Mitternacht erstellt — ab morgen bist du im Daily Report dabei."
+        )
         await ctx.reply(
-            f"✅ **{account.nameOnPlatform}** ({stats.rank}) wird ab jetzt getrackt!"
+            f"✅ **{account.nameOnPlatform}** ({stats.rank}) wird ab jetzt getrackt!{daily_hint}"
         )
 
     @commands.command(name="untrack")
@@ -201,14 +214,14 @@ class StatsCog(commands.Cog, name="Stats"):
 
         username: str = user_record["r6_username"]
         platform: str = user_record["platform"]
-        today = date.today()
 
-        # Fetch the midnight baseline snapshot for today
-        snapshot = await db.get_snapshot(self.pool, target.id, today)
+        # Fetch the most recent baseline snapshot
+        snapshot = await db.get_latest_snapshot(self.pool, target.id)
 
         if snapshot is None:
             await ctx.reply(
-                "📭 Noch kein Snapshot für heute. Komm um Mitternacht wieder."
+                "📭 Noch kein Snapshot vorhanden. "
+                "Der erste Snapshot wird heute Nacht um Mitternacht erstellt."
             )
             return
 
