@@ -54,6 +54,12 @@ class LazyDayOutput(BaseModel):
     message: str    # Full @everyone message in German, varied daily
 
 
+class QuoteOutput(BaseModel):
+    """Returned by quote_agent — a single R6-themed quote."""
+    quote: str      # The quote itself
+    operator: str   # The operator the quote is attributed to
+
+
 # ---------------------------------------------------------------------------
 # Agent definitions
 # ---------------------------------------------------------------------------
@@ -73,6 +79,21 @@ critic_agent: Agent[None, CritiqueOutput] = Agent(
         "Der 'verdict' soll eine kurze, vernichtende Schlussbeurteilung sein (max. 5 Wörter). "
         "Das 'rating' ist eine Zahl von 1 (komplette Katastrophe) bis 10 (unerwartet gut). "
         "Sei kreativ, abwechslungsreich und verwende verschiedene Beleidigungen."
+    ),
+)
+
+# Quote agent — generates a random R6-operator-style quote
+quote_agent: Agent[None, QuoteOutput] = Agent(
+    model=AnthropicModel("claude-haiku-4-5-20251001", provider=AnthropicProvider(api_key=settings.anthropic_api_key)),
+    output_type=QuoteOutput,
+    system_prompt=(
+        "Du bist ein Rainbow Six Siege Operator. "
+        "Generiere ein einziges, authentisches Zitat im Stil eines R6-Operators. "
+        "Das Zitat soll taktisch, dramatisch oder motivierend klingen — auf Englisch, "
+        "wie die echten Operator-Zitate im Spiel. "
+        "Wähle zufällig einen echten R6-Operator (z.B. Sledge, Ash, Thermite, Jäger, Caveira, "
+        "Vigil, Echo, Hibana, Maestro, Bandit, etc.) und schreibe das Zitat in dessen Charakter. "
+        "Das Zitat soll 1-2 Sätze lang sein. Sei kreativ und variiere den Stil."
     ),
 )
 
