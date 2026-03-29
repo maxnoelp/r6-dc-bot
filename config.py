@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     # Bot command prefix
     command_prefix: str = "!"
 
+    # Feature flags
+    quote_enabled: bool = True
+
 
 # Singleton instance used throughout the application
 settings = Settings()
