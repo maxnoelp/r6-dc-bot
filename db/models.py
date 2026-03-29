@@ -80,22 +80,41 @@ async def upsert_guild_config(
     post_channel_id: int,
     command_channel_id: int,
     quote_channel_id: int | None = None,
+    update_channel_id: int | None = None,
 ) -> None:
     """Insert or update the channel configuration for a Discord guild."""
     await pool.execute(
         """
-        INSERT INTO guild_config (guild_id, post_channel_id, command_channel_id, quote_channel_id)
-        VALUES ($1, $2, $3, $4)
+        INSERT INTO guild_config
+            (guild_id, post_channel_id, command_channel_id, quote_channel_id, update_channel_id)
+        VALUES ($1, $2, $3, $4, $5)
         ON CONFLICT (guild_id) DO UPDATE
             SET post_channel_id     = EXCLUDED.post_channel_id,
                 command_channel_id  = EXCLUDED.command_channel_id,
                 quote_channel_id    = EXCLUDED.quote_channel_id,
+                update_channel_id   = EXCLUDED.update_channel_id,
                 updated_at          = NOW()
         """,
         guild_id,
         post_channel_id,
         command_channel_id,
         quote_channel_id,
+        update_channel_id,
+    )
+
+
+async def set_changelog_hash(
+    pool: asyncpg.Pool,
+    guild_id: int,
+    hash_value: str,
+) -> None:
+    """Store the MD5 hash of the last posted changelog section for a guild."""
+    await pool.execute(
+        """
+        UPDATE guild_config SET last_changelog_hash = $2 WHERE guild_id = $1
+        """,
+        guild_id,
+        hash_value,
     )
 
 
