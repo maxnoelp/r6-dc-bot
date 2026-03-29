@@ -15,8 +15,12 @@ from pathlib import Path
 # Module-level pool reference — set once by init_db()
 _pool: asyncpg.Pool | None = None
 
-# Path to the SQL migration file relative to this file's location
-_MIGRATION_FILE = Path(__file__).parent / "migrations" / "001_init.sql"
+# Migration files applied in order at startup
+_MIGRATIONS_DIR = Path(__file__).parent / "migrations"
+_MIGRATION_FILES = [
+    "001_init.sql",
+    "002_add_quote_channel.sql",
+]
 
 
 async def init_db(dsn: str) -> asyncpg.Pool:
@@ -34,10 +38,11 @@ async def init_db(dsn: str) -> asyncpg.Pool:
 
     _pool = await asyncpg.create_pool(dsn=dsn, min_size=2, max_size=10)
 
-    # Read and execute the migration SQL so schema is always up-to-date
-    migration_sql = _MIGRATION_FILE.read_text(encoding="utf-8")
+    # Read and execute all migration files in order
     async with _pool.acquire() as conn:
-        await conn.execute(migration_sql)
+        for filename in _MIGRATION_FILES:
+            sql = (_MIGRATIONS_DIR / filename).read_text(encoding="utf-8")
+            await conn.execute(sql)
 
     return _pool
 
