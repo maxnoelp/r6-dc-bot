@@ -547,9 +547,16 @@ class StatsCog(commands.Cog, name="Stats"):
     @commands.Cog.listener()
     async def on_ready(self) -> None:
         """Post the latest changelog section to each guild's update channel if it changed."""
-        section_hash, section_text = _latest_changelog_section()
-        if not section_text:
+        section_hash, title, sections = _parse_latest_changelog()
+        if not title:
             return
+
+        _SECTION_ICONS = {
+            "Added":   "🟢  ADDED",
+            "Changed": "🟡  CHANGED",
+            "Fixed":   "🔧  FIXED",
+            "Removed": "🔴  REMOVED",
+        }
 
         for guild in self.bot.guilds:
             config = await db.get_guild_config(self.pool, guild.id)
@@ -564,13 +571,26 @@ class StatsCog(commands.Cog, name="Stats"):
             if not isinstance(channel, discord.TextChannel):
                 continue
 
-            # Discord message limit is 2000 chars — truncate if needed
-            content = section_text
-            if len(content) > 1900:
-                content = content[:1900] + "\n…*(gekürzt)*"
+            embed = discord.Embed(
+                title=f"📋  {title}",
+                color=discord.Color.from_str("#E8272E"),
+                timestamp=datetime.datetime.now(tz=timezone.utc),
+            )
+
+            for section_name, entries in sections.items():
+                if not entries:
+                    continue
+                icon = _SECTION_ICONS.get(section_name, f"▸  {section_name.upper()}")
+                value = "\n".join(f"• {e}" for e in entries)
+                # Truncate field to Discord's 1024 char limit
+                if len(value) > 1020:
+                    value = value[:1020] + "\n…"
+                embed.add_field(name=icon, value=value, inline=False)
+
+            embed.set_footer(text="R6 Tracker Bot  •  Changelog")
 
             try:
-                await channel.send(f"📋 **Changelog Update**\n```md\n{content}\n```")
+                await channel.send(embed=embed)
                 await db.set_changelog_hash(self.pool, guild.id, section_hash)
             except discord.HTTPException:
                 pass
@@ -686,27 +706,38 @@ class StatsCog(commands.Cog, name="Stats"):
 _CHANGELOG_PATH = Path(__file__).parent.parent / "CHANGELOG.md"
 
 
-def _latest_changelog_section() -> tuple[str, str]:
+def _parse_latest_changelog() -> tuple[str, str, dict[str, list[str]]]:
     """
-    Parse CHANGELOG.md and return (hash, text) of the first ## section.
+    Parse CHANGELOG.md and return (hash, title, sections) of the first ## block.
 
-    Returns an empty string for both if the file is missing or empty.
+    sections is a dict like {"Added": [...], "Changed": [...], "Fixed": [...]}
+    Returns empty values if the file is missing or unparseable.
     """
     if not _CHANGELOG_PATH.exists():
-        return "", ""
+        return "", "", {}
 
     text = _CHANGELOG_PATH.read_text(encoding="utf-8")
-    sections = text.split("\n## ")
-
-    # First split gives us everything before the first ##, then the sections
-    # Handle both "starts with ##" and "## somewhere inside"
-    raw = sections[1] if len(sections) > 1 else ""
+    parts = text.split("\n## ")
+    raw = parts[1] if len(parts) > 1 else ""
     if not raw:
-        return "", ""
+        return "", "", {}
 
-    section_text = "## " + raw.strip()
-    section_hash = hashlib.md5(section_text.encode()).hexdigest()
-    return section_hash, section_text
+    lines = raw.strip().splitlines()
+    title = lines[0].strip()  # e.g. "[Unreleased] — 2026-03-29"
+    section_hash = hashlib.md5(raw.encode()).hexdigest()
+
+    sections: dict[str, list[str]] = {}
+    current: str | None = None
+    for line in lines[1:]:
+        if line.startswith("### "):
+            current = line[4:].strip()
+            sections[current] = []
+        elif current and line.startswith("- "):
+            # Only top-level bullet points, strip markdown bold/code for readability
+            entry = line[2:].strip()
+            sections[current].append(entry)
+
+    return section_hash, title, sections
 
 
 async def setup(bot: commands.Bot) -> None:
