@@ -79,20 +79,23 @@ async def upsert_guild_config(
     guild_id: int,
     post_channel_id: int,
     command_channel_id: int,
+    quote_channel_id: int | None = None,
 ) -> None:
     """Insert or update the channel configuration for a Discord guild."""
     await pool.execute(
         """
-        INSERT INTO guild_config (guild_id, post_channel_id, command_channel_id)
-        VALUES ($1, $2, $3)
+        INSERT INTO guild_config (guild_id, post_channel_id, command_channel_id, quote_channel_id)
+        VALUES ($1, $2, $3, $4)
         ON CONFLICT (guild_id) DO UPDATE
             SET post_channel_id     = EXCLUDED.post_channel_id,
                 command_channel_id  = EXCLUDED.command_channel_id,
+                quote_channel_id    = EXCLUDED.quote_channel_id,
                 updated_at          = NOW()
         """,
         guild_id,
         post_channel_id,
         command_channel_id,
+        quote_channel_id,
     )
 
 
