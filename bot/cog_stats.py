@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import hashlib
 from datetime import date, timezone
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -509,6 +511,70 @@ class StatsCog(commands.Cog, name="Stats"):
         )
         return tuple(not isinstance(r, Exception) for r in results)
 
+    @commands.command(name="setupdate")
+    @commands.has_permissions(administrator=True)
+    async def setupdate(
+        self,
+        ctx: commands.Context,
+        update_channel: discord.TextChannel,
+    ) -> None:
+        """
+        Set the channel where changelog updates are posted.
+
+        Usage: !setupdate #channel
+        Requires administrator permission.
+        """
+        existing = await db.get_guild_config(self.pool, ctx.guild.id)
+        if existing is None:
+            await ctx.reply("❌ Bitte erst `!setup` ausführen.")
+            return
+
+        await db.upsert_guild_config(
+            self.pool,
+            ctx.guild.id,
+            existing["post_channel_id"],
+            existing["command_channel_id"],
+            existing["quote_channel_id"],
+            update_channel.id,
+        )
+        await ctx.reply(f"✅ Update-Channel gesetzt: {update_channel.mention}")
+
+    @setupdate.error
+    async def setupdate_error(self, ctx: commands.Context, error: Exception) -> None:
+        if isinstance(error, commands.MissingPermissions):
+            await ctx.reply("❌ Du brauchst Administrator-Rechte für diesen Befehl.")
+
+    @commands.Cog.listener()
+    async def on_ready(self) -> None:
+        """Post the latest changelog section to each guild's update channel if it changed."""
+        section_hash, section_text = _latest_changelog_section()
+        if not section_text:
+            return
+
+        for guild in self.bot.guilds:
+            config = await db.get_guild_config(self.pool, guild.id)
+            if config is None:
+                continue
+
+            if config["last_changelog_hash"] == section_hash:
+                continue
+
+            channel_id = config["update_channel_id"] or config["command_channel_id"]
+            channel = guild.get_channel(channel_id)
+            if not isinstance(channel, discord.TextChannel):
+                continue
+
+            # Discord message limit is 2000 chars — truncate if needed
+            content = section_text
+            if len(content) > 1900:
+                content = content[:1900] + "\n…*(gekürzt)*"
+
+            try:
+                await channel.send(f"📋 **Changelog Update**\n```md\n{content}\n```")
+                await db.set_changelog_hash(self.pool, guild.id, section_hash)
+            except discord.HTTPException:
+                pass
+
     @commands.command(name="info")
     async def info(self, ctx: commands.Context) -> None:
         """
@@ -615,6 +681,32 @@ class StatsCog(commands.Cog, name="Stats"):
         )
 
         await ctx.send(embed=embed)
+
+
+_CHANGELOG_PATH = Path(__file__).parent.parent / "CHANGELOG.md"
+
+
+def _latest_changelog_section() -> tuple[str, str]:
+    """
+    Parse CHANGELOG.md and return (hash, text) of the first ## section.
+
+    Returns an empty string for both if the file is missing or empty.
+    """
+    if not _CHANGELOG_PATH.exists():
+        return "", ""
+
+    text = _CHANGELOG_PATH.read_text(encoding="utf-8")
+    sections = text.split("\n## ")
+
+    # First split gives us everything before the first ##, then the sections
+    # Handle both "starts with ##" and "## somewhere inside"
+    raw = sections[1] if len(sections) > 1 else ""
+    if not raw:
+        return "", ""
+
+    section_text = "## " + raw.strip()
+    section_hash = hashlib.md5(section_text.encode()).hexdigest()
+    return section_hash, section_text
 
 
 async def setup(bot: commands.Bot) -> None:

@@ -20,6 +20,7 @@ _MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 _MIGRATION_FILES = [
     "001_init.sql",
     "002_add_quote_channel.sql",
+    "003_add_update_channel.sql",
 ]
 
 
