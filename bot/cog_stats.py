@@ -17,10 +17,12 @@ All commands silently ignore invocations outside the configured command channel
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 from datetime import date, timezone
 from zoneinfo import ZoneInfo
 
+import httpx
 import discord
 from discord.ext import commands
 
@@ -30,6 +32,8 @@ _BERLIN = ZoneInfo("Europe/Berlin")
 def _today_berlin() -> date:
     return datetime.datetime.now(tz=_BERLIN).date()
 
+from agent.critic import QuoteOutput, quote_agent
+from config import settings
 from db import models as db
 from r6api.client import R6DataClient
 
@@ -356,29 +360,154 @@ class StatsCog(commands.Cog, name="Stats"):
         ctx: commands.Context,
         post_channel: discord.TextChannel,
         command_channel: discord.TextChannel,
+        quote_channel: discord.TextChannel | None = None,
     ) -> None:
         """
-        Configure the post and command channels for this guild.
+        Configure the post, command, and quote channels for this guild.
 
-        Usage: !setup #post-channel #command-channel
+        Usage: !setup #post-channel #command-channel [#quote-channel]
         Requires administrator permission.
         """
+        # If no quote channel provided, preserve the existing one
+        if quote_channel is None:
+            existing = await db.get_guild_config(self.pool, ctx.guild.id)
+            quote_channel_id = existing["quote_channel_id"] if existing else None
+        else:
+            quote_channel_id = quote_channel.id
+
         await db.upsert_guild_config(
             self.pool,
             ctx.guild.id,
             post_channel.id,
             command_channel.id,
+            quote_channel_id,
         )
+
+        if quote_channel_id:
+            quote_mention = f"<#{quote_channel_id}>"
+        else:
+            quote_mention = "_(nicht gesetzt)_"
+
         await ctx.reply(
             f"✅ Setup gespeichert!\n"
             f"  • Post-Channel: {post_channel.mention}\n"
-            f"  • Command-Channel: {command_channel.mention}"
+            f"  • Command-Channel: {command_channel.mention}\n"
+            f"  • Quote-Channel: {quote_mention}"
         )
 
     @setup.error
     async def setup_error(self, ctx: commands.Context, error: Exception) -> None:
         if isinstance(error, commands.MissingPermissions):
             await ctx.reply("❌ Du brauchst Administrator-Rechte für diesen Befehl.")
+
+    @commands.command(name="setquote")
+    @commands.has_permissions(administrator=True)
+    async def setquote(
+        self,
+        ctx: commands.Context,
+        quote_channel: discord.TextChannel,
+    ) -> None:
+        """
+        Set (or update) the quote channel without touching the other channel settings.
+
+        Usage: !setquote #quote-channel
+        Requires administrator permission.
+        """
+        existing = await db.get_guild_config(self.pool, ctx.guild.id)
+        if existing is None:
+            await ctx.reply("❌ Bitte erst `!setup` ausführen.")
+            return
+
+        await db.upsert_guild_config(
+            self.pool,
+            ctx.guild.id,
+            existing["post_channel_id"],
+            existing["command_channel_id"],
+            quote_channel.id,
+        )
+        await ctx.reply(f"✅ Quote-Channel gesetzt: {quote_channel.mention}")
+
+    @setquote.error
+    async def setquote_error(self, ctx: commands.Context, error: Exception) -> None:
+        if isinstance(error, commands.MissingPermissions):
+            await ctx.reply("❌ Du brauchst Administrator-Rechte für diesen Befehl.")
+
+    async def _in_quote_channel(self, ctx: commands.Context) -> bool:
+        """
+        Return True if the command was sent in the configured quote channel.
+
+        Falls back to the command channel check if no quote channel is set.
+        """
+        if ctx.guild is None:
+            return True
+
+        config = await db.get_guild_config(self.pool, ctx.guild.id)
+        if config is None:
+            return True
+
+        quote_channel_id = config["quote_channel_id"]
+        if quote_channel_id is None:
+            # No quote channel configured — fall back to command channel
+            return ctx.channel.id == config["command_channel_id"]
+
+        return ctx.channel.id == quote_channel_id
+
+    @commands.command(name="quote")
+    async def quote(self, ctx: commands.Context) -> None:
+        """
+        Generate a random R6 operator quote via AI.
+
+        Usage: !quote
+        """
+        if not settings.quote_enabled:
+            return
+        if not await self._in_quote_channel(ctx):
+            return
+
+        async with ctx.typing():
+            try:
+                result = await quote_agent.run("Generiere ein Zitat.")
+                output: QuoteOutput = result.output
+            except Exception as exc:
+                await ctx.reply(f"❌ Fehler beim Generieren des Zitats: {exc}")
+                return
+
+        embed = discord.Embed(
+            description=f'*"{output.quote}"*',
+            color=discord.Color.dark_gold(),
+        )
+        embed.set_footer(text=f"— {output.operator}")
+        await ctx.reply(embed=embed)
+
+    async def _health_checks(self) -> tuple[bool, bool, bool]:
+        """Run DB, R6Data API, and Claude API checks concurrently."""
+
+        async def check_db() -> None:
+            await self.pool.fetchval("SELECT 1")
+
+        async def check_r6() -> None:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get("https://api.r6data.eu")
+                if resp.status_code >= 500:
+                    raise ConnectionError(resp.status_code)
+
+        async def check_ai() -> None:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(
+                    "https://api.anthropic.com/v1/models",
+                    headers={
+                        "x-api-key": settings.anthropic_api_key,
+                        "anthropic-version": "2023-06-01",
+                    },
+                )
+                if resp.status_code != 200:
+                    raise ConnectionError(resp.status_code)
+
+        results = await asyncio.gather(
+            check_db(), check_r6(), check_ai(),
+            return_exceptions=True,
+        )
+        return tuple(not isinstance(r, Exception) for r in results)
 
     @commands.command(name="info")
     async def info(self, ctx: commands.Context) -> None:
@@ -390,57 +519,100 @@ class StatsCog(commands.Cog, name="Stats"):
         if not await self._in_command_channel(ctx):
             return
 
+        async with ctx.typing():
+            db_ok, r6_ok, ai_ok = await self._health_checks()
+
+        all_ok  = db_ok and r6_ok and ai_ok
+        any_ok  = db_ok or r6_ok or ai_ok
+
+        def status_line(label: str, ok: bool) -> str:
+            return f"+ {label:<14} ONLINE" if ok else f"- {label:<14} OFFLINE"
+
+        if all_ok:
+            overall = "+ OVERALL        ONLINE"
+        elif any_ok:
+            overall = "! OVERALL        DEGRADED"
+        else:
+            overall = "- OVERALL        OFFLINE"
+
+        status_block = "\n".join([
+            status_line("DATABASE", db_ok),
+            status_line("R6DATA API", r6_ok),
+            status_line("KI (CLAUDE)", ai_ok),
+            "─" * 26,
+            overall,
+        ])
+
         embed = discord.Embed(
-            title="🎯 R6 Tracker Bot",
+            title="RAINBOW SIX SIEGE  //  TRACKER",
             description=(
-                "Ich tracke eure Rainbow Six Siege Stats und beleidige euch täglich um 22:00 Uhr.\n"
-                "Hier ist alles was ihr wissen müsst:"
+                f"```diff\n{status_block}\n```"
+                f"```fix\n"
+                f"SNAPSHOT: {settings.snapshot_hour:02d}:{settings.snapshot_minute:02d}  |  "
+                f"REPORT: {settings.daily_hour:02d}:{settings.daily_minute:02d} CET\n"
+                f"```"
+                "Ich tracke eure Stats, analysiere euer Versagen und präsentiere\n"
+                "es jeden Abend mit KI-generierter Kritik. Kein Mitleid. Nur Daten."
             ),
-            color=discord.Color.dark_gold(),
+            color=discord.Color.from_str("#E8272E"),
+            timestamp=datetime.datetime.now(tz=timezone.utc),
         )
 
+        # ── Account ────────────────────────────────────────────────────
         embed.add_field(
-            name="📋 Account registrieren",
+            name="▸  ACCOUNT",
             value=(
-                "`!track <username> [platform]`\n"
-                "Verknüpft euren R6-Account mit eurem Discord.\n"
-                "Platform ist optional, Standard: `uplay`\n"
-                "Andere Optionen: `psn`, `xbl`\n\n"
-                "**Beispiel:** `!track prinz.gg uplay`"
+                "```yaml\n"
+                "!track <username> [platform]  # Account verknüpfen\n"
+                "!untrack                       # Tracking beenden\n"
+                "```"
+                "`platform` → `uplay` *(Standard)*, `psn`, `xbl`"
             ),
             inline=False,
         )
 
+        # ── Stats ──────────────────────────────────────────────────────
         embed.add_field(
-            name="❌ Account entfernen",
+            name="▸  STATISTIKEN",
             value=(
-                "`!untrack`\n"
-                "Entfernt euch aus dem Tracking."
+                "```yaml\n"
+                "!stats              # Heutiger Delta seit Mitternacht\n"
+                "!stats @user        # Delta eines anderen Spielers\n"
+                "!season             # Vollständige Season-Übersicht\n"
+                "!season @user       # Season-Stats eines anderen\n"
+                "```"
             ),
             inline=False,
         )
 
+        # ── Daily Report ───────────────────────────────────────────────
         embed.add_field(
-            name="📊 Zwischenbilanz",
+            name="▸  TÄGLICHER REPORT  //  22:00 UHR",
             value=(
-                "`!stats` — Deine heutigen Stats seit Mitternacht\n"
-                "`!stats @user` — Stats eines anderen Spielers\n\n"
-                "Zeigt Kills, Deaths, Wins, Losses und Rang-Delta von heute."
+                "```yaml\n"
+                "Kills  Deaths  W/L  Rang-Delta  Top-Operator\n"
+                "```"
+                "Automatisch für jeden aktiven Spieler — "
+                "generiert von einer KI die kein Erbarmen kennt."
             ),
             inline=False,
         )
 
-        embed.add_field(
-            name="🕙 Täglicher Report",
-            value=(
-                "Jeden Abend um **22:00 Uhr** postet der Bot automatisch\n"
-                "für jeden aktiven Spieler eine Zusammenfassung mit\n"
-                "KI-generierter Kritik — ehrlich, brutal, unterhaltsam."
-            ),
-            inline=False,
-        )
+        # ── Quote (optional) ───────────────────────────────────────────
+        if settings.quote_enabled:
+            embed.add_field(
+                name="▸  OPERATOR INTEL",
+                value=(
+                    "```yaml\n"
+                    "!quote  # KI-generiertes Zitat eines R6-Operators\n"
+                    "```"
+                ),
+                inline=False,
+            )
 
-        embed.set_footer(text="Nur registrierte Spieler werden im Daily Report erwähnt.")
+        embed.set_footer(
+            text="Nur registrierte Spieler erscheinen im Daily Report  •  !track um mitzumachen"
+        )
 
         await ctx.send(embed=embed)
 
