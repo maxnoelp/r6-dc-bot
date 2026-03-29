@@ -2,7 +2,7 @@
 
 A Discord bot that tracks Rainbow Six Siege statistics for registered players and posts a daily AI-generated roast report every evening at 22:00.
 
-Built with **pydantic-ai + Google Gemini**, **discord.py**, **PostgreSQL**, and the [R6Data API](https://r6data.eu/api-docs).
+Built with **pydantic-ai + Claude (Anthropic)**, **discord.py**, **PostgreSQL**, and the [R6Data API](https://r6data.eu/api-docs).
 
 ---
 
@@ -12,13 +12,15 @@ Built with **pydantic-ai + Google Gemini**, **discord.py**, **PostgreSQL**, and 
 - **`!season`** — full season stats embed with rank badge, player avatar, K/D, W/L, win rate, and top 3 most-played operators with operator artwork
 - **Daily snapshot at 00:00** — baseline stats saved for every tracked player
 - **Daily report at 22:00** — per-player embed with today's kills, deaths, wins, losses, rank delta, and most-played operator, each post pinging the Discord user
-- **AI critique** — Gemini generates a brutal, sarcastic German roast for each player's session
+- **AI critique** — Claude generates a brutal, sarcastic German roast for each player's session
 - **Lazy-day detection** — if nobody played, `@everyone` gets an AI-generated insult instead
 - **`!stats`** — mid-day delta since the midnight snapshot
+- **`!quote`** — AI-generated R6 operator quote (toggleable via `QUOTE_ENABLED`)
 - **`!snapshot`** — admin command to manually save a baseline snapshot
 - **`!report`** — admin command to trigger the full report immediately
 - **`!showsnapshot`** — admin command to inspect the stored snapshot for any registered user (shows date, time, rank, kills, deaths, wins, losses)
-- **`!info`** — posts a styled help embed in the command channel
+- **`!setquote #channel`** — admin command to set the quote channel without re-running `!setup`
+- **`!info`** — posts a styled help embed with live health checks (DB, R6Data API, Claude) and configured schedule times
 
 ---
 
@@ -35,11 +37,11 @@ Built with **pydantic-ai + Google Gemini**, **discord.py**, **PostgreSQL**, and 
        → Fetches live stats again for every user
        → Computes delta: kills, deaths, wins, losses, rank points
        → delta == 0 for a user?  → skip that user (no post)
-       → All users have delta == 0? → @everyone + Gemini lazy-day insult
+       → All users have delta == 0? → @everyone + Claude lazy-day insult
        → Otherwise: for each active user:
            1. Build DailyStats object from delta values
-           2. Pass JSON to Gemini via pydantic-ai critic_agent
-           3. Gemini returns CritiqueOutput (headline, critique, verdict, rating)
+           2. Pass JSON to Claude via pydantic-ai critic_agent
+           3. Claude returns CritiqueOutput (headline, critique, verdict, rating)
            4. Bot sends a Discord embed to the configured post channel
               with a @mention ping for that user
 ```
@@ -63,7 +65,7 @@ r6_agent/
 ├── .env.example             # Environment variable template
 │
 ├── bot/
-│   ├── cog_stats.py         # !track, !untrack, !stats, !season, !info, !setup
+│   ├── cog_stats.py         # !track, !untrack, !stats, !season, !quote, !info, !setup, !setquote
 │   └── cog_daily.py         # Scheduler (APScheduler) + !snapshot, !report
 │
 ├── r6api/
@@ -76,7 +78,8 @@ r6_agent/
     ├── database.py          # asyncpg pool init + migration runner
     ├── models.py            # All SQL query functions (no ORM)
     └── migrations/
-        └── 001_init.sql     # CREATE TABLE IF NOT EXISTS schema
+        ├── 001_init.sql     # Initial schema (users, guild_config, snapshots)
+        └── 002_add_quote_channel.sql  # Adds quote_channel_id to guild_config
 ```
 
 ---
@@ -98,6 +101,7 @@ CREATE TABLE guild_config (
     guild_id            BIGINT PRIMARY KEY,
     post_channel_id     BIGINT NOT NULL,         -- Where daily reports are posted
     command_channel_id  BIGINT NOT NULL,         -- Where bot commands are accepted
+    quote_channel_id    BIGINT,                  -- Where !quote is allowed (optional)
     updated_at          TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -127,7 +131,7 @@ CREATE TABLE snapshots (
 - Docker or Podman (for local PostgreSQL via `docker-compose`)
 - A Discord bot token with **Message Content** and **Server Members** privileged intents enabled
 - An [R6Data API key](https://r6data.eu/dashboard)
-- A [Google Gemini API key](https://aistudio.google.com) (free tier available)
+- An [Anthropic API key](https://console.anthropic.com)
 
 ### 1. Clone & install dependencies
 
@@ -151,7 +155,7 @@ Edit `.env`:
 DISCORD_TOKEN=your_discord_bot_token
 R6DATA_API_KEY=your_r6data_api_key
 DATABASE_URL=postgresql://r6bot:r6bot@localhost:5432/r6bot
-GOOGLE_API_KEY=your_gemini_api_key
+ANTHROPIC_API_KEY=your_anthropic_api_key
 
 # Optional — defaults shown
 DAILY_HOUR=22
@@ -159,6 +163,9 @@ DAILY_MINUTE=0
 SNAPSHOT_HOUR=0
 SNAPSHOT_MINUTE=0
 COMMAND_PREFIX=!
+
+# Feature flags
+QUOTE_ENABLED=true   # set to false to disable !quote
 ```
 
 ### 3. Start PostgreSQL
@@ -169,7 +176,7 @@ docker-compose up -d
 
 > On Fedora/Podman: the `docker-compose.yml` uses `docker.io/library/postgres:16` explicitly to avoid registry resolution issues.
 
-The schema is applied automatically on first bot start via `db/migrations/001_init.sql`.
+All migration files in `db/migrations/` are applied automatically in order on every bot start (idempotent via `IF NOT EXISTS` / `IF NOT EXISTS` guards).
 
 ### 4. Run the bot
 
@@ -183,6 +190,12 @@ Run this once in any channel (before `!setup`, all channels are accepted):
 
 ```
 !setup #bashing #bot-commands
+```
+
+Optionally set a dedicated quote channel (can also be passed as third arg to `!setup`):
+
+```
+!setquote #quotes
 ```
 
 Then register your account:
@@ -203,13 +216,16 @@ Then register your account:
 | `!stats @user` | Anyone | Show another registered user's today delta. |
 | `!season` | Anyone | Full season stats embed: rank badge, avatar, K/D, W/L, win rate, top 3 operators. |
 | `!season @user` | Anyone | Season stats for another registered user. |
+| `!quote` | Anyone | AI-generated R6 operator quote. Only available in the configured quote channel. Disabled if `QUOTE_ENABLED=false`. |
 | `!info` | Anyone | Posts a styled help embed listing all commands and how to register. |
-| `!setup #post #commands` | Admin | Set the channel for daily reports and the channel for commands. |
+| `!setup #post #commands [#quotes]` | Admin | Set the post channel, command channel, and optionally the quote channel. |
+| `!setquote #channel` | Admin | Set (or update) the quote channel without re-running `!setup`. |
 | `!snapshot` | Admin | Manually save a baseline snapshot for all users right now. |
-| `!report` | Admin | Manually trigger the full 22:00 report right now. |
-| `!showsnapshot [@user]` | Admin | Show the stored snapshot for a user: creation time, rank, kills, deaths, wins, losses. |
+| `!report [offset]` | Admin | Manually trigger the full 22:00 report. Optional negative offset uses an older snapshot as baseline (e.g. `!report -1` = yesterday). |
+| `!showsnapshot [@user] [offset]` | Admin | Show the stored snapshot for a user: creation time, rank, kills, deaths, wins, losses. |
 
 > Commands sent outside the configured command channel are silently ignored. Before `!setup` is run, all channels are accepted.
+> `!quote` uses the quote channel if configured, otherwise falls back to the command channel.
 
 ---
 
@@ -256,7 +272,7 @@ esst Chips und habt Angst vor dem Ranked-Abbau. Nächstes Mal melde ich euch
 beim Fortnite-Kids-Turnier an — da passen eure Skills besser hin.
 ```
 
-Gemini generates a different variation every day.
+Claude generates a different variation every day.
 
 ---
 
@@ -264,12 +280,13 @@ Gemini generates a different variation every day.
 
 ### pydantic-ai Agents
 
-Two agents are defined in `agent/critic.py`, both using `google-gla:gemini-2.0-flash` via `GoogleProvider`:
+Three agents are defined in `agent/critic.py`, all using `claude-haiku-4-5-20251001` via `AnthropicProvider`:
 
 | Agent | Input | Output | Purpose |
 |---|---|---|---|
 | `critic_agent` | `DailyStats` as JSON string | `CritiqueOutput` (headline, critique, verdict, rating) | Per-player daily roast |
 | `lazy_day_agent` | Trigger string | `LazyDayOutput` (message) | @everyone insult when nobody played |
+| `quote_agent` | Trigger string | `QuoteOutput` (quote, operator) | Random R6 operator quote for `!quote` |
 
 Agents use `output_type=` (pydantic-ai ≥ 1.x) and results are accessed via `result.output`.
 
@@ -303,6 +320,20 @@ e.g. `platinum-1.webp`, `diamond-3.webp`, `champion.webp`
 ### Channel Guard
 
 Every command calls `_in_command_channel()` before executing. If a `guild_config` row exists and the message was sent in a different channel, the command is silently dropped.
+
+`!quote` uses a separate `_in_quote_channel()` check — it enforces `quote_channel_id` if set, otherwise falls back to `command_channel_id`.
+
+### `!info` Health Checks
+
+When `!info` is called, three checks run concurrently via `asyncio.gather`:
+
+| Check | Method |
+|---|---|
+| Database | `SELECT 1` on the asyncpg pool |
+| R6Data API | `GET https://api.r6data.eu` — fails on 5xx or timeout |
+| Claude API | `GET https://api.anthropic.com/v1/models` with the API key — fails on non-200 |
+
+Results are shown in the embed as a `diff` code block (green `+` / red `-` / orange `!`). Overall status is `ONLINE` / `DEGRADED` / `OFFLINE` depending on how many checks pass.
 
 ### Scheduler Timezone
 
