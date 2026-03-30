@@ -4,6 +4,20 @@ All notable changes to this project will be documented here.
 
 ---
 
+## [Release 0.3.1] — 2026-03-30
+
+### Added
+- **`!compare <p1> <p2> [platform]`** — side-by-side season stat comparison embed.
+  Accepts `@mention` (tracked players, uses stored platform) or raw R6 username (any player).
+  Mixed input supported: `!compare @user SomeUsername`.
+  Shows Rang, K/D, Win Rate, Kills, W/L, Main Operator — winner per category bolded.
+  Embed color reflects overall winner (green / red / grey).
+- **`!leaderboard [metric]`** (alias `!lb`) — ranked leaderboard of all tracked players.
+  Metrics: `rp` / `rank` (default), `kd` / `k/d`, `wins` / `win`.
+  All API calls run in parallel. Embed accent color matches the #1 player's rank tier.
+
+---
+
 ## [Unreleased] — 2026-03-29
 
 ### Added
