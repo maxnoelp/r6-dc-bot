@@ -295,6 +295,8 @@ This posts the button embed in `#support`. Users click **🎫 Ticket öffnen**, 
 | `!stats @user` | Anyone | Show another registered user's today delta. |
 | `!season` | Anyone | Full season stats embed: rank badge, avatar, K/D, W/L, win rate, top 3 operators. |
 | `!season @user` | Anyone | Season stats for another registered user. |
+| `!compare <p1> <p2> [platform]` | Anyone | Side-by-side season stat comparison. Each player can be a `@mention` (tracked) or a raw R6 username (anyone). Platform defaults to `uplay`. |
+| `!leaderboard [metric]` | Anyone | Server leaderboard of all tracked players. Metrics: `rp` (default), `kd`, `wins`. Alias: `!lb`. |
 | `!quote` | Anyone | AI-generated R6 operator quote. Only available in the configured quote channel. Disabled if `QUOTE_ENABLED=false`. |
 | `!info` | Anyone | Posts a styled help embed listing all commands and how to register. |
 | `!setup #post #commands [#quotes]` | Admin | Set the post channel, command channel, and optionally the quote channel. |
