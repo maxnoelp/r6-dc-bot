@@ -4,7 +4,32 @@ All notable changes to this project will be documented here.
 
 ---
 
-## [Unreleased] — 2026-03-29
+## [Released] — 02-04-2026 — v0.0.2
+
+### Added
+- **Support Ticket System** — vollständiges Ticket-System mit Panel, Modal, privaten Channels, Claim- und Schließ-Mechanik.
+  - `!ticketsetup #channel @role [@role ...]` — konfiguriert Panel-Channel, Kategorie (auto-detect) und Support-Rollen (mehrere möglich).
+  - `!ticketpanel` — postet das Panel-Embed mit Button in den konfigurierten Channel.
+  - Panel wird beim Bot-Start automatisch geprüft und neu gepostet falls die Nachricht gelöscht wurde.
+  - Beim Claimen verlieren andere Support-Rollen Schreibzugriff — nur Claimer + Author können noch schreiben.
+  - Schließen löscht den Channel nach 5 Sekunden.
+  - Buttons überleben Bot-Neustarts (persistent Views via `custom_id`).
+  - `TICKETS_ENABLED` feature flag — `true`/`false` in `.env`.
+- **`!compare <p1> <p2>`** — Season-Vergleich zweier Spieler nebeneinander. Unterstützt `@mention` und rohen R6-Username gemischt.
+- **`!leaderboard [rp|kd|wins]`** — Server-Rangliste aller getrackten Spieler. Standard: `rp`. Alias: `!lb`.
+- Migration `004_add_ticket_tables.sql` — neue Tabellen: `ticket_config`, `ticket_support_roles`, `tickets`.
+
+### Changed
+- Codebase in Einzeldateien aufgeteilt: alle R6-Commands unter `bot/r6/` (`track`, `stats`, `season`, `compare`, `leaderboard`, `quote`).
+- `R6_ENABLED` master switch — alle R6-API-Commands per ENV an/ausschaltbar.
+- `!setquote` in eigene Datei `bot/cog_setquote.py` isoliert.
+- R6Data API Retry-Logik — bei 403/429 wird 30s gewartet und einmal wiederholt.
+- `asyncio.sleep(2)` zwischen User-Fetches in Snapshot- und Report-Job.
+- `api_errors`-Counter im Report-Job — Lazy-Day-Post wird unterdrückt wenn alle API-Calls fehlschlagen.
+
+---
+
+## [Released] — 2026-04-02
 
 ### Added
 - **`!quote` command** — AI-generated R6 operator quote via `quote_agent` (Claude Haiku).

@@ -21,6 +21,7 @@ Built with **pydantic-ai + Claude (Anthropic)**, **discord.py**, **PostgreSQL**,
 - **`!showsnapshot`** — admin command to inspect the stored snapshot for any registered user (shows date, time, rank, kills, deaths, wins, losses)
 - **`!setquote #channel`** — admin command to set the quote channel without re-running `!setup`
 - **`!info`** — posts a styled help embed with live health checks (DB, R6Data API, Claude) and configured schedule times
+- **Support Ticket System** — panel with button, modal, private channels, claim/close mechanics, persistent across bot restarts (toggleable via `TICKETS_ENABLED`)
 
 ---
 
@@ -103,6 +104,36 @@ CREATE TABLE guild_config (
     command_channel_id  BIGINT NOT NULL,         -- Where bot commands are accepted
     quote_channel_id    BIGINT,                  -- Where !quote is allowed (optional)
     updated_at          TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Ticket system configuration per guild
+CREATE TABLE ticket_config (
+    guild_id            BIGINT PRIMARY KEY,
+    panel_channel_id    BIGINT,              -- Channel where the panel button is posted
+    ticket_category_id  BIGINT,              -- Discord category for ticket channels
+    panel_message_id    BIGINT,              -- Message ID of the panel (for restart check)
+    updated_at          TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Support roles allowed to see and claim tickets
+CREATE TABLE ticket_support_roles (
+    guild_id    BIGINT NOT NULL,
+    role_id     BIGINT NOT NULL,
+    PRIMARY KEY (guild_id, role_id)
+);
+
+-- Individual tickets
+CREATE TABLE tickets (
+    id          SERIAL PRIMARY KEY,
+    guild_id    BIGINT NOT NULL,
+    channel_id  BIGINT UNIQUE,              -- Set after channel creation
+    author_id   BIGINT NOT NULL,
+    claimer_id  BIGINT,
+    title       VARCHAR(100) NOT NULL,
+    reason      TEXT NOT NULL,
+    status      VARCHAR(16) NOT NULL DEFAULT 'open',  -- open | claimed | closed
+    created_at  TIMESTAMPTZ DEFAULT NOW(),
+    closed_at   TIMESTAMPTZ
 );
 
 -- Daily baseline snapshots for delta calculation
@@ -204,6 +235,54 @@ Then register your account:
 !track YourUsername uplay
 ```
 
+### 6. Ticket system setup
+
+> Skip this section if `TICKETS_ENABLED=false`.
+
+**Step 1 — Create a panel channel**
+
+Create a text channel where the ticket button will be posted (e.g. `#support`). Place it inside a Discord category — new ticket channels will automatically be created in the same category.
+
+**Step 2 — Configure the ticket system**
+
+```
+!ticketsetup #support @SupportTeam
+```
+
+You can specify multiple support roles:
+
+```
+!ticketsetup #support @Moderator @Helper
+```
+
+This saves the panel channel, ticket category (auto-detected from `#support`'s parent category), and support roles. Any previously stored panel message is cleared — a fresh one will be posted at the next bot start.
+
+**Step 3 — Post the panel**
+
+```
+!ticketpanel
+```
+
+This posts the button embed in `#support`. Users click **🎫 Ticket öffnen**, fill in a title and description, and a private `#ticket-NNNN` channel is created only visible to them and support roles.
+
+> The panel is also posted automatically on every bot start if the message no longer exists (e.g. it was manually deleted). You only need `!ticketpanel` for the initial post or after changing the setup.
+
+**Support roles** can:
+- **Claimen** — takes ownership; other support roles lose write access, only the claimer + author can write
+- **Schließen** — deletes the channel after 5 seconds
+
+**Ticket authors** can also close their own ticket at any time.
+
+**Permissions per role:**
+
+| Who | Before claim | After claim |
+|---|---|---|
+| @everyone | no access | no access |
+| Ticket author | read + write | read + write |
+| Support roles | read + write | read only |
+| Claimer | — | read + write |
+| Discord admins | unrestricted (native) | unrestricted |
+
 ---
 
 ## Bot Commands
@@ -223,6 +302,8 @@ Then register your account:
 | `!snapshot` | Admin | Manually save a baseline snapshot for all users right now. |
 | `!report [offset]` | Admin | Manually trigger the full 22:00 report. Optional negative offset uses an older snapshot as baseline (e.g. `!report -1` = yesterday). |
 | `!showsnapshot [@user] [offset]` | Admin | Show the stored snapshot for a user: creation time, rank, kills, deaths, wins, losses. |
+| `!ticketsetup #channel @role ...` | Admin | Configure the ticket system: panel channel + one or more support roles. Category is auto-detected from the panel channel. |
+| `!ticketpanel` | Admin | Post (or re-post) the ticket panel button embed in the configured panel channel. |
 
 > Commands sent outside the configured command channel are silently ignored. Before `!setup` is run, all channels are accepted.
 > `!quote` uses the quote channel if configured, otherwise falls back to the command channel.

@@ -212,3 +212,135 @@ async def get_latest_snapshot(
         """,
         discord_id,
     )
+
+
+# ---------------------------------------------------------------------------
+# Ticket system
+# ---------------------------------------------------------------------------
+
+async def upsert_ticket_config(
+    pool: asyncpg.Pool,
+    guild_id: int,
+    panel_channel_id: int,
+    ticket_category_id: int | None,
+) -> None:
+    """Insert or update the ticket system configuration for a guild."""
+    await pool.execute(
+        """
+        INSERT INTO ticket_config (guild_id, panel_channel_id, ticket_category_id)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (guild_id) DO UPDATE
+            SET panel_channel_id   = EXCLUDED.panel_channel_id,
+                ticket_category_id = EXCLUDED.ticket_category_id,
+                panel_message_id   = NULL,
+                updated_at         = NOW()
+        """,
+        guild_id,
+        panel_channel_id,
+        ticket_category_id,
+    )
+
+
+async def get_ticket_config(
+    pool: asyncpg.Pool, guild_id: int
+) -> Optional[asyncpg.Record]:
+    """Fetch ticket system configuration for a guild, or None if not configured."""
+    return await pool.fetchrow(
+        "SELECT * FROM ticket_config WHERE guild_id = $1", guild_id
+    )
+
+
+async def update_panel_message_id(
+    pool: asyncpg.Pool, guild_id: int, message_id: int | None
+) -> None:
+    """Store (or clear) the panel message ID so restarts can verify it still exists."""
+    await pool.execute(
+        "UPDATE ticket_config SET panel_message_id = $2 WHERE guild_id = $1",
+        guild_id,
+        message_id,
+    )
+
+
+async def set_ticket_support_roles(
+    pool: asyncpg.Pool, guild_id: int, role_ids: list[int]
+) -> None:
+    """Replace all support roles for a guild (delete + insert in one transaction)."""
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                "DELETE FROM ticket_support_roles WHERE guild_id = $1", guild_id
+            )
+            await conn.executemany(
+                "INSERT INTO ticket_support_roles (guild_id, role_id) VALUES ($1, $2)",
+                [(guild_id, rid) for rid in role_ids],
+            )
+
+
+async def get_ticket_support_roles(
+    pool: asyncpg.Pool, guild_id: int
+) -> list[int]:
+    """Return a list of support role IDs configured for a guild."""
+    rows = await pool.fetch(
+        "SELECT role_id FROM ticket_support_roles WHERE guild_id = $1", guild_id
+    )
+    return [r["role_id"] for r in rows]
+
+
+async def create_ticket(
+    pool: asyncpg.Pool,
+    guild_id: int,
+    author_id: int,
+    title: str,
+    reason: str,
+) -> asyncpg.Record:
+    """Insert a new ticket row and return the full record (including generated id)."""
+    return await pool.fetchrow(
+        """
+        INSERT INTO tickets (guild_id, author_id, title, reason)
+        VALUES ($1, $2, $3, $4)
+        RETURNING *
+        """,
+        guild_id,
+        author_id,
+        title,
+        reason,
+    )
+
+
+async def update_ticket_channel_id(
+    pool: asyncpg.Pool, ticket_id: int, channel_id: int
+) -> None:
+    """Set the Discord channel ID on a ticket after the channel has been created."""
+    await pool.execute(
+        "UPDATE tickets SET channel_id = $2 WHERE id = $1",
+        ticket_id,
+        channel_id,
+    )
+
+
+async def get_ticket_by_channel(
+    pool: asyncpg.Pool, channel_id: int
+) -> Optional[asyncpg.Record]:
+    """Look up a ticket by its Discord channel ID."""
+    return await pool.fetchrow(
+        "SELECT * FROM tickets WHERE channel_id = $1", channel_id
+    )
+
+
+async def claim_ticket(
+    pool: asyncpg.Pool, ticket_id: int, claimer_id: int
+) -> None:
+    """Mark a ticket as claimed and record who claimed it."""
+    await pool.execute(
+        "UPDATE tickets SET status = 'claimed', claimer_id = $2 WHERE id = $1",
+        ticket_id,
+        claimer_id,
+    )
+
+
+async def close_ticket(pool: asyncpg.Pool, ticket_id: int) -> None:
+    """Mark a ticket as closed and record the close timestamp."""
+    await pool.execute(
+        "UPDATE tickets SET status = 'closed', closed_at = NOW() WHERE id = $1",
+        ticket_id,
+    )

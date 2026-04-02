@@ -21,6 +21,7 @@ _MIGRATION_FILES = [
     "001_init.sql",
     "002_add_quote_channel.sql",
     "003_add_update_channel.sql",
+    "004_add_ticket_tables.sql",
 ]
 
 
