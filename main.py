@@ -76,8 +76,21 @@ async def main() -> None:
     # ------------------------------------------------------------------
     # Load cogs
     # ------------------------------------------------------------------
-    await bot.load_extension("bot.cog_stats")
+    if settings.r6_enabled:
+        await bot.load_extension("bot.r6.track")
+        await bot.load_extension("bot.r6.stats")
+        await bot.load_extension("bot.r6.season")
+        await bot.load_extension("bot.r6.compare")
+        await bot.load_extension("bot.r6.leaderboard")
+        if settings.quote_enabled:
+            await bot.load_extension("bot.r6.quote")
+    await bot.load_extension("bot.cog_setup")
+    await bot.load_extension("bot.cog_setquote")
+    await bot.load_extension("bot.cog_admin")
     await bot.load_extension("bot.cog_daily")
+    if settings.tickets_enabled:
+        await bot.load_extension("bot.support_system.cog_ticket_actions")
+        await bot.load_extension("bot.support_system.cog_ticket_setup")
     log.info("Cogs loaded.")
 
     # ------------------------------------------------------------------
