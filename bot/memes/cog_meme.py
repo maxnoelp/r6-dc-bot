@@ -24,8 +24,7 @@ _SUBREDDITS = [
     "HolUp",
 ]
 
-_HEADERS = {"User-Agent": "r6-dc-bot/1.0"}
-_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".gif", ".webp")
+_MEME_API = "https://meme-api.com/gimme"
 
 
 class MemeCog(commands.Cog, name="Meme"):
@@ -81,12 +80,12 @@ class MemeCog(commands.Cog, name="Meme"):
             return
         embed = discord.Embed(
             title=post["title"],
-            url=f"https://reddit.com{post['permalink']}",
+            url=post.get("postLink", ""),
             color=discord.Color.orange(),
         )
         embed.set_image(url=post["url"])
         embed.set_footer(
-            text=f"r/{post['subreddit']}  •  👍 {post['ups']:,}  •  💬 {post['num_comments']:,}"
+            text=f"r/{post['subreddit']}  •  👍 {post.get('ups', 0):,}"
         )
         try:
             await channel.send(embed=embed)
@@ -130,34 +129,29 @@ class MemeCog(commands.Cog, name="Meme"):
 
         embed = discord.Embed(
             title=post["title"],
-            url=f"https://reddit.com{post['permalink']}",
+            url=post.get("postLink", ""),
             color=discord.Color.orange(),
         )
         embed.set_image(url=post["url"])
         embed.set_footer(
-            text=f"r/{post['subreddit']}  •  👍 {post['ups']:,}  •  💬 {post['num_comments']:,}"
+            text=f"r/{post['subreddit']}  •  👍 {post.get('ups', 0):,}"
         )
         await ctx.send(embed=embed)
 
     async def _fetch_meme(self) -> dict | None:
         subreddit = random.choice(_SUBREDDITS)
-        url = f"https://www.reddit.com/r/{subreddit}/hot.json?limit=50"
         try:
-            async with httpx.AsyncClient(timeout=10.0, headers=_HEADERS) as client:
-                resp = await client.get(url, follow_redirects=True)
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(f"{_MEME_API}/{subreddit}", follow_redirects=True)
                 resp.raise_for_status()
                 data = resp.json()
         except Exception:
             return None
 
-        posts = [
-            p["data"]
-            for p in data["data"]["children"]
-            if not p["data"].get("stickied")
-            and not p["data"].get("is_video")
-            and p["data"].get("url", "").lower().endswith(_IMAGE_EXTS)
-        ]
-        return random.choice(posts) if posts else None
+        # meme-api returns nsfw flag and post_link — skip nsfw
+        if data.get("nsfw") or not data.get("url"):
+            return None
+        return data
 
     @meme.error
     async def meme_error(self, ctx: commands.Context, error: Exception) -> None:
