@@ -103,6 +103,17 @@ async def upsert_guild_config(
     )
 
 
+async def set_meme_channel(
+    pool: asyncpg.Pool, guild_id: int, channel_id: int | None
+) -> None:
+    """Set (or clear) the meme channel for a guild."""
+    await pool.execute(
+        "UPDATE guild_config SET meme_channel_id = $2 WHERE guild_id = $1",
+        guild_id,
+        channel_id,
+    )
+
+
 async def set_changelog_hash(
     pool: asyncpg.Pool,
     guild_id: int,
