@@ -27,4 +27,12 @@ class R6BaseCog(commands.Cog):
         config = await db.get_guild_config(self.pool, ctx.guild.id)
         if config is None:
             return True
-        return ctx.channel.id == config["command_channel_id"]
+        if ctx.channel.id == config["command_channel_id"]:
+            return True
+        channel = ctx.guild.get_channel(config["command_channel_id"])
+        hint = channel.mention if channel else "`#bot-commands`"
+        await ctx.reply(
+            f"❌ Dieser Command funktioniert nur in {hint}.",
+            delete_after=8,
+        )
+        return False

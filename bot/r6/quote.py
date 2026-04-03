@@ -19,10 +19,16 @@ class QuoteCog(R6BaseCog, name="Quote"):
         config = await db.get_guild_config(self.pool, ctx.guild.id)
         if config is None:
             return True
-        quote_channel_id = config["quote_channel_id"]
-        if quote_channel_id is None:
-            return ctx.channel.id == config["command_channel_id"]
-        return ctx.channel.id == quote_channel_id
+        target_id = config["quote_channel_id"] or config["command_channel_id"]
+        if ctx.channel.id == target_id:
+            return True
+        channel = ctx.guild.get_channel(target_id)
+        hint = channel.mention if channel else "`#quotes`"
+        await ctx.reply(
+            f"❌ `!quote` funktioniert nur in {hint}.",
+            delete_after=8,
+        )
+        return False
 
     @commands.command(name="quote")
     async def quote(self, ctx: commands.Context) -> None:

@@ -20,8 +20,12 @@ Built with **pydantic-ai + Claude (Anthropic)**, **discord.py**, **PostgreSQL**,
 - **`!report`** — admin command to trigger the full report immediately
 - **`!showsnapshot`** — admin command to inspect the stored snapshot for any registered user (shows date, time, rank, kills, deaths, wins, losses)
 - **`!setquote #channel`** — admin command to set the quote channel without re-running `!setup`
-- **`!info`** — posts a styled help embed with live health checks (DB, R6Data API, Claude) and configured schedule times
+- **`!info`** — posts a styled help embed with live health checks (DB, R6Data API, Claude), configured channel mentions, and active feature sections only
 - **Support Ticket System** — panel with button, modal, private channels, claim/close mechanics, persistent across bot restarts (toggleable via `TICKETS_ENABLED`)
+- **`!meme`** — random meme from Reddit, posted as embed (toggleable via `MEMES_ENABLED`)
+- **`!memeset #channel`** — restrict `!meme` to a specific channel
+- **`!memeschedule #channel HH:MM`** — daily automatic meme post at a fixed time (CET/CEST)
+- **Channel guards** — commands sent to the wrong channel reply with the correct channel mention and auto-delete after 8 seconds
 
 ---
 
@@ -66,21 +70,44 @@ r6_agent/
 ├── .env.example             # Environment variable template
 │
 ├── bot/
-│   ├── cog_stats.py         # !track, !untrack, !stats, !season, !quote, !info, !setup, !setquote
-│   └── cog_daily.py         # Scheduler (APScheduler) + !snapshot, !report
+│   ├── r6/                      # All R6-related commands (R6_ENABLED)
+│   │   ├── _base.py             # R6BaseCog base class + channel guard
+│   │   ├── _utils.py            # Shared helpers (rank colors, K/D, etc.)
+│   │   ├── track.py             # !track, !untrack
+│   │   ├── stats.py             # !stats
+│   │   ├── season.py            # !season
+│   │   ├── compare.py           # !compare
+│   │   ├── leaderboard.py       # !leaderboard / !lb
+│   │   └── quote.py             # !quote (QUOTE_ENABLED)
+│   ├── memes/                   # Meme system (MEMES_ENABLED)
+│   │   └── cog_meme.py          # !meme, !memeset, !memeschedule, !memescheduleclear
+│   ├── support_system/          # Ticket system (TICKETS_ENABLED)
+│   │   ├── _modals.py           # TicketOpenModal
+│   │   ├── _permissions.py      # build_overwrites() helper
+│   │   ├── _views.py            # TicketOpenView, TicketActionView (persistent)
+│   │   ├── cog_ticket_setup.py  # !ticketsetup
+│   │   └── cog_ticket_actions.py # !ticketpanel, create/claim/close + on_ready panel check
+│   ├── cog_admin.py             # !info (health checks + channel hints)
+│   ├── cog_daily.py             # APScheduler jobs + !snapshot, !report, !showsnapshot
+│   ├── cog_setup.py             # !setup, !setupdate
+│   └── cog_setquote.py          # !setquote
 │
 ├── r6api/
-│   └── client.py            # Async httpx client for api.r6data.eu
+│   └── client.py                # Async httpx client for api.r6data.eu (with retry logic)
 │
 ├── agent/
-│   └── critic.py            # pydantic-ai Agent definitions + Pydantic models
+│   └── critic.py                # pydantic-ai agents: critic, lazy_day, quote
 │
 └── db/
-    ├── database.py          # asyncpg pool init + migration runner
-    ├── models.py            # All SQL query functions (no ORM)
+    ├── database.py              # asyncpg pool init + migration runner
+    ├── models.py                # All SQL query functions (no ORM)
     └── migrations/
-        ├── 001_init.sql     # Initial schema (users, guild_config, snapshots)
-        └── 002_add_quote_channel.sql  # Adds quote_channel_id to guild_config
+        ├── 001_init.sql         # users, guild_config, snapshots
+        ├── 002_add_quote_channel.sql
+        ├── 003_add_update_channel.sql
+        ├── 004_add_ticket_tables.sql
+        ├── 005_add_meme_channel.sql
+        └── 006_add_meme_schedule.sql
 ```
 
 ---
@@ -134,6 +161,19 @@ CREATE TABLE tickets (
     status      VARCHAR(16) NOT NULL DEFAULT 'open',  -- open | claimed | closed
     created_at  TIMESTAMPTZ DEFAULT NOW(),
     closed_at   TIMESTAMPTZ
+);
+
+-- Meme channel restriction per guild (added by migration 005)
+-- meme_channel_id column is in guild_config (see above)
+
+-- Daily meme auto-post schedule per guild
+CREATE TABLE meme_schedule (
+    guild_id    BIGINT PRIMARY KEY,
+    channel_id  BIGINT NOT NULL,
+    post_hour   SMALLINT NOT NULL,  -- 0–23 (CET/CEST)
+    post_minute SMALLINT NOT NULL DEFAULT 0,
+    enabled     BOOLEAN NOT NULL DEFAULT TRUE,
+    updated_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Daily baseline snapshots for delta calculation
@@ -196,7 +236,10 @@ SNAPSHOT_MINUTE=0
 COMMAND_PREFIX=!
 
 # Feature flags
-QUOTE_ENABLED=true   # set to false to disable !quote
+R6_ENABLED=true      # master switch for all R6 commands
+QUOTE_ENABLED=true   # !quote (requires R6_ENABLED=true)
+TICKETS_ENABLED=true # support ticket system
+MEMES_ENABLED=true   # !meme + auto-schedule
 ```
 
 ### 3. Start PostgreSQL
@@ -283,6 +326,30 @@ This posts the button embed in `#support`. Users click **🎫 Ticket öffnen**, 
 | Claimer | — | read + write |
 | Discord admins | unrestricted (native) | unrestricted |
 
+### 7. Meme system setup
+
+> Skip this section if `MEMES_ENABLED=false`.
+
+**Optional — restrict to a channel:**
+
+```
+!memeset #memes
+```
+
+Without this, `!meme` works in any channel.
+
+**Optional — daily auto-post:**
+
+```
+!memeschedule #memes 12:00
+```
+
+Posts a random meme every day at 12:00 CET/CEST in `#memes`. The schedule survives bot restarts. To remove it:
+
+```
+!memescheduleclear
+```
+
 ---
 
 ## Bot Commands
@@ -306,9 +373,14 @@ This posts the button embed in `#support`. Users click **🎫 Ticket öffnen**, 
 | `!showsnapshot [@user] [offset]` | Admin | Show the stored snapshot for a user: creation time, rank, kills, deaths, wins, losses. |
 | `!ticketsetup #channel @role ...` | Admin | Configure the ticket system: panel channel + one or more support roles. Category is auto-detected from the panel channel. |
 | `!ticketpanel` | Admin | Post (or re-post) the ticket panel button embed in the configured panel channel. |
+| `!listallcommands` | Admin | Full command list as embed, grouped by feature. Only active features shown. Alias: `!lac`. |
+| `!memeset #channel` | Admin | Set the channel where `!meme` is allowed. |
+| `!memeschedule #channel HH:MM` | Admin | Schedule a daily automatic meme post at a fixed time (CET/CEST). |
+| `!memescheduleclear` | Admin | Remove the daily meme auto-post schedule. |
 
-> Commands sent outside the configured command channel are silently ignored. Before `!setup` is run, all channels are accepted.
+> Commands sent to the wrong channel reply with the correct channel mention and auto-delete after 8 seconds. Before `!setup` is run, all channels are accepted.
 > `!quote` uses the quote channel if configured, otherwise falls back to the command channel.
+> `!meme` is allowed everywhere if no meme channel is set via `!memeset`.
 
 ---
 
@@ -402,9 +474,11 @@ e.g. `platinum-1.webp`, `diamond-3.webp`, `champion.webp`
 
 ### Channel Guard
 
-Every command calls `_in_command_channel()` before executing. If a `guild_config` row exists and the message was sent in a different channel, the command is silently dropped.
+Every command calls a channel guard before executing. If the message was sent in the wrong channel, the bot replies with an error message including a clickable mention of the correct channel, then auto-deletes it after 8 seconds.
 
-`!quote` uses a separate `_in_quote_channel()` check — it enforces `quote_channel_id` if set, otherwise falls back to `command_channel_id`.
+- R6 commands → `command_channel_id`
+- `!quote` → `quote_channel_id` if set, otherwise `command_channel_id`
+- `!meme` → `meme_channel_id` if set, otherwise any channel
 
 ### `!info` Health Checks
 
