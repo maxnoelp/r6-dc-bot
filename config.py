@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     r6_enabled:      bool = True   # master switch for all R6 API commands
     quote_enabled:   bool = True   # !quote specifically (requires r6_enabled)
     tickets_enabled: bool = True   # support ticket system
+    memes_enabled:   bool = True   # !meme command
 
 
 # Singleton instance used throughout the application
