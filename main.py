@@ -84,6 +84,8 @@ async def main() -> None:
         await bot.load_extension("bot.r6.leaderboard")
         if settings.quote_enabled:
             await bot.load_extension("bot.r6.quote")
+    if settings.memes_enabled:
+        await bot.load_extension("bot.memes.cog_meme")
     await bot.load_extension("bot.cog_setup")
     await bot.load_extension("bot.cog_setquote")
     await bot.load_extension("bot.cog_admin")
