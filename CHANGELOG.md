@@ -4,6 +4,27 @@ All notable changes to this project will be documented here.
 
 ---
 
+## [Unreleased] — 03-04-2026 — v0.0.3
+
+### Added
+- **`!meme`** — postet ein zufälliges Bild-Meme von Reddit (`r/memes`, `r/dankmemes`, `r/me_irl`, `r/AdviceAnimals`, `r/HolUp`). 5s Cooldown pro User.
+- **`!memeset #channel`** — setzt den Channel in dem `!meme` erlaubt ist (Admin).
+- **`!memeschedule #channel HH:MM`** — plant einen täglichen automatischen Meme-Post zu einer festen Uhrzeit (CET/CEST, Admin).
+- **`!memescheduleclear`** — löscht den automatischen Meme-Post-Schedule (Admin).
+- Migration `005_add_meme_channel.sql` — `meme_channel_id` in `guild_config`.
+- Migration `006_add_meme_schedule.sql` — neue Tabelle `meme_schedule` (guild_id, channel_id, post_hour, post_minute, enabled).
+- `MEMES_ENABLED` feature flag — `true`/`false` in `.env`.
+
+- **`!listallcommands`** (`!lac`) — Admin-only Command: postet eine vollständige Command-Liste als Embed, gruppiert nach Feature. Zeigt nur aktive Features. Invoke-Nachricht wird automatisch gelöscht.
+
+### Changed
+- `!info` Embed zeigt jetzt den konfigurierten Channel für jedes Feature als klickbares Mention.
+- `!info` zeigt nur Sections für aktive Features (R6, Quote, Memes, Tickets).
+- Channel Guards angepasst: Bot antwortet jetzt mit einer Fehlermeldung + Channel-Mention statt still zu ignorieren. Nachricht löscht sich nach 8 Sekunden.
+- `bot/memes/cog_meme.py` in eigenen Ordner `bot/memes/` verschoben.
+
+---
+
 ## [Released] — 02-04-2026 — v0.0.2
 
 ### Added

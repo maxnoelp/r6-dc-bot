@@ -23,6 +23,7 @@ _MIGRATION_FILES = [
     "003_add_update_channel.sql",
     "004_add_ticket_tables.sql",
     "005_add_meme_channel.sql",
+    "006_add_meme_schedule.sql",
 ]
 
 

@@ -103,6 +103,46 @@ async def upsert_guild_config(
     )
 
 
+async def upsert_meme_schedule(
+    pool: asyncpg.Pool,
+    guild_id: int,
+    channel_id: int,
+    post_hour: int,
+    post_minute: int,
+) -> None:
+    """Insert or update the daily meme auto-post schedule for a guild."""
+    await pool.execute(
+        """
+        INSERT INTO meme_schedule (guild_id, channel_id, post_hour, post_minute)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (guild_id) DO UPDATE
+            SET channel_id  = EXCLUDED.channel_id,
+                post_hour   = EXCLUDED.post_hour,
+                post_minute = EXCLUDED.post_minute,
+                enabled     = TRUE,
+                updated_at  = NOW()
+        """,
+        guild_id,
+        channel_id,
+        post_hour,
+        post_minute,
+    )
+
+
+async def delete_meme_schedule(pool: asyncpg.Pool, guild_id: int) -> None:
+    """Remove the meme auto-post schedule for a guild."""
+    await pool.execute(
+        "DELETE FROM meme_schedule WHERE guild_id = $1", guild_id
+    )
+
+
+async def get_all_meme_schedules(pool: asyncpg.Pool) -> list[asyncpg.Record]:
+    """Return all active meme schedules across all guilds."""
+    return await pool.fetch(
+        "SELECT * FROM meme_schedule WHERE enabled = TRUE"
+    )
+
+
 async def set_meme_channel(
     pool: asyncpg.Pool, guild_id: int, channel_id: int | None
 ) -> None:

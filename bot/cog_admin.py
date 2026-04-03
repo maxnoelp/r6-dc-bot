@@ -60,7 +60,15 @@ class AdminCog(commands.Cog, name="Admin"):
         config = await db.get_guild_config(self.pool, ctx.guild.id)
         if config is None:
             return True
-        return ctx.channel.id == config["command_channel_id"]
+        if ctx.channel.id == config["command_channel_id"]:
+            return True
+        channel = ctx.guild.get_channel(config["command_channel_id"])
+        hint = channel.mention if channel else "`#bot-commands`"
+        await ctx.reply(
+            f"❌ Dieser Command funktioniert nur in {hint}.",
+            delete_after=8,
+        )
+        return False
 
     async def _health_checks(self) -> tuple[bool, bool, bool]:
         async def check_db() -> None:
@@ -101,6 +109,16 @@ class AdminCog(commands.Cog, name="Admin"):
         async with ctx.typing():
             db_ok, r6_ok, ai_ok = await self._health_checks()
 
+        # Load guild config + ticket config for channel hints
+        guild_config = await db.get_guild_config(self.pool, ctx.guild.id) if ctx.guild else None
+        ticket_config = await db.get_ticket_config(self.pool, ctx.guild.id) if ctx.guild else None
+
+        def ch(channel_id: int | None) -> str:
+            if channel_id is None or ctx.guild is None:
+                return "*(nicht gesetzt)*"
+            c = ctx.guild.get_channel(channel_id)
+            return c.mention if c else "*(nicht gefunden)*"
+
         all_ok = db_ok and r6_ok and ai_ok
         any_ok = db_ok or r6_ok or ai_ok
 
@@ -114,36 +132,29 @@ class AdminCog(commands.Cog, name="Admin"):
         else:
             overall = "- OVERALL        OFFLINE"
 
-        status_block = "\n".join(
-            [
-                status_line("DATABASE", db_ok),
-                status_line("R6DATA API", r6_ok),
-                status_line("KI (CLAUDE)", ai_ok),
-                "─" * 26,
-                overall,
-            ]
-        )
+        status_lines = [status_line("DATABASE", db_ok)]
+        if settings.r6_enabled:
+            status_lines.append(status_line("R6DATA API", r6_ok))
+        status_lines.append(status_line("KI (CLAUDE)", ai_ok))
+        status_lines += ["─" * 26, overall]
+
+        status_block = "\n".join(status_lines)
 
         embed = discord.Embed(
-            title="RAINBOW SIX SIEGE  //  TRACKER",
+            title="BOT  //  ÜBERSICHT",
             description=(
                 f"```diff\n{status_block}\n```"
-                f"```fix\n"
+                "```fix\n"
                 "Bot-Version: 0.0.2\n"
                 "Entwickelt von MaxNoelp\n"
+                "```"
             ),
             color=discord.Color.from_str("#E8272E"),
             timestamp=datetime.datetime.now(tz=timezone.utc),
         )
 
-        if settings.r6_enabled and settings.quote_enabled:
-            embed.add_field(
-                name="▸  OPERATOR RANDOM QUOTES",
-                value=(
-                    "```yaml\n!quote  # KI-generiertes Zitat eines R6-Operators\n```"
-                ),
-                inline=False,
-            )
+        cmd_ch  = ch(guild_config["command_channel_id"] if guild_config else None)
+        post_ch = ch(guild_config["post_channel_id"] if guild_config else None)
 
         if settings.r6_enabled:
             embed.add_field(
@@ -153,12 +164,11 @@ class AdminCog(commands.Cog, name="Admin"):
                     "!track <username> [platform]  # Account verknüpfen\n"
                     "!untrack                       # Tracking beenden\n"
                     "```"
-                    "`platform` → `uplay` *(Standard)*, `psn`, `xbl`"
+                    f"`platform` → `uplay` *(Standard)*, `psn`, `xbl`\n"
+                    f"Channel: {cmd_ch}\n"
                     f"```fix\n"
-                    f"REPORT: {settings.daily_hour:02d}:{settings.daily_minute:02d} CET\n"
-                    f"```"
-                    "Ich tracke eure Stats, analysiere euer Versagen und präsentiere\n"
-                    "es jeden Abend mit KI-generierter Kritik. Kein Mitleid. Nur Daten."
+                    f"REPORT: {settings.daily_hour:02d}:{settings.daily_minute:02d} CET → {post_ch}\n"
+                    "```"
                 ),
                 inline=False,
             )
@@ -174,38 +184,162 @@ class AdminCog(commands.Cog, name="Admin"):
                     "!compare p1 p2      # Season-Vergleich zweier Spieler\n"
                     "!leaderboard [rp|kd|wins]  # Server-Rangliste\n"
                     "```"
-                    "`p1`/`p2` → `@mention` oder R6-Username  •  Alias: `!lb`"
-                ),
-                inline=False,
-            )
-
-            embed.add_field(
-                name="▸  TÄGLICHER REPORT  //  22:00 UHR",
-                value=(
-                    "```yaml\n"
-                    "Kills  Deaths  W/L  Rang-Delta  Top-Operator\n"
-                    "```"
-                    "Automatisch für jeden aktiven Spieler — "
-                    "generiert von einer KI die kein Erbarmen kennt."
+                    f"`p1`/`p2` → `@mention` oder R6-Username  •  Alias: `!lb`\n"
+                    f"Channel: {cmd_ch}"
                 ),
                 inline=False,
             )
 
             if settings.quote_enabled:
+                quote_ch = ch(
+                    (guild_config["quote_channel_id"] or guild_config["command_channel_id"])
+                    if guild_config else None
+                )
                 embed.add_field(
                     name="▸  OPERATOR INTEL",
                     value=(
                         "```yaml\n"
                         "!quote  # KI-generiertes Zitat eines R6-Operators\n"
                         "```"
+                        f"Channel: {quote_ch}"
                     ),
                     inline=False,
                 )
 
-        embed.set_footer(
-            text="Nur registrierte Spieler erscheinen im Daily Report  •  !track um mitzumachen"
-        )
+        if settings.memes_enabled:
+            meme_ch = ch(
+                (guild_config["meme_channel_id"] or guild_config["command_channel_id"])
+                if guild_config else None
+            )
+            embed.add_field(
+                name="▸  MEMES",
+                value=(
+                    "```yaml\n"
+                    "!meme  # Zufälliges Meme von Reddit\n"
+                    "```"
+                    f"Channel: {meme_ch}"
+                ),
+                inline=False,
+            )
+
+        if settings.tickets_enabled:
+            panel_ch = ch(ticket_config["panel_channel_id"] if ticket_config else None)
+            embed.add_field(
+                name="▸  SUPPORT",
+                value=(
+                    "```yaml\n"
+                    "🎫 Ticket öffnen  # Button im Panel-Channel klicken\n"
+                    "```"
+                    f"Panel: {panel_ch}"
+                ),
+                inline=False,
+            )
+
+        footer = "!info — Live-Statuscheck aller Dienste"
+        if settings.r6_enabled:
+            footer = "Nur registrierte Spieler erscheinen im Daily Report  •  !track um mitzumachen"
+        embed.set_footer(text=footer)
         await ctx.send(embed=embed)
+
+    # ------------------------------------------------------------------
+    # !listallcommands
+    # ------------------------------------------------------------------
+
+    @commands.command(name="listallcommands", aliases=["lac"])
+    @commands.has_permissions(administrator=True)
+    async def listallcommands(self, ctx: commands.Context) -> None:
+        """List all active commands grouped by feature. Admin only. Usage: !listallcommands"""
+        if not await self._in_command_channel(ctx):
+            return
+
+        embed = discord.Embed(
+            title="📋  ALLE COMMANDS",
+            color=discord.Color.from_str("#E8272E"),
+            timestamp=datetime.datetime.now(tz=timezone.utc),
+        )
+
+        # Always available
+        embed.add_field(
+            name="⚙️  SETUP  (Admin)",
+            value=(
+                "`!setup #post #commands [#quotes]`\n"
+                "`!setupdate #channel`\n"
+                "`!setquote #channel`\n"
+                "`!info`\n"
+                "`!listallcommands` · `!lac`"
+            ),
+            inline=False,
+        )
+
+        if settings.r6_enabled:
+            embed.add_field(
+                name="🎮  R6 — ACCOUNT",
+                value=(
+                    "`!track <username> [platform]`\n"
+                    "`!untrack`"
+                ),
+                inline=True,
+            )
+            embed.add_field(
+                name="📊  R6 — STATISTIKEN",
+                value=(
+                    "`!stats [@user]`\n"
+                    "`!season [@user]`\n"
+                    "`!compare <p1> <p2>`\n"
+                    "`!leaderboard [rp|kd|wins]` · `!lb`"
+                ),
+                inline=True,
+            )
+            embed.add_field(
+                name="🗓️  R6 — REPORT  (Admin)",
+                value=(
+                    "`!snapshot`\n"
+                    "`!report [offset]`\n"
+                    "`!showsnapshot [@user] [offset]`"
+                ),
+                inline=True,
+            )
+            if settings.quote_enabled:
+                embed.add_field(
+                    name="💬  OPERATOR INTEL",
+                    value="`!quote`",
+                    inline=True,
+                )
+
+        if settings.memes_enabled:
+            embed.add_field(
+                name="😂  MEMES",
+                value=(
+                    "`!meme`\n"
+                    "`!memeset #channel`  *(Admin)*\n"
+                    "`!memeschedule #channel HH:MM`  *(Admin)*\n"
+                    "`!memescheduleclear`  *(Admin)*"
+                ),
+                inline=True,
+            )
+
+        if settings.tickets_enabled:
+            embed.add_field(
+                name="🎫  SUPPORT  (Admin)",
+                value=(
+                    "`!ticketsetup #channel @role ...`\n"
+                    "`!ticketpanel`"
+                ),
+                inline=True,
+            )
+
+        embed.set_footer(text="Nur für Admins sichtbar  •  Zeigt nur aktive Features")
+        await ctx.send(embed=embed, ephemeral=False)
+        # Delete invoking message so it stays clean
+        try:
+            await ctx.message.delete()
+        except discord.HTTPException:
+            pass
+
+    @listallcommands.error
+    async def listallcommands_error(self, ctx: commands.Context, error: Exception) -> None:
+        if isinstance(error, commands.MissingPermissions):
+            await ctx.reply("❌ Du brauchst Administrator-Rechte für diesen Befehl.", delete_after=5)
 
     @commands.Cog.listener()
     async def on_ready(self) -> None:
