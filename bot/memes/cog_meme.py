@@ -25,6 +25,8 @@ _SUBREDDITS = [
 ]
 
 _MEME_API = "https://meme-api.com/gimme"
+_HEADERS = {"User-Agent": "r6-dc-bot/1.0"}
+_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".gif", ".webp")
 
 
 class MemeCog(commands.Cog, name="Meme"):
