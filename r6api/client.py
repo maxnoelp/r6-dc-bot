@@ -203,43 +203,28 @@ class R6DataClient:
 
     async def get_operator_stats(self, username: str, platform: str = "uplay") -> list[OperatorStat]:
         platform = _normalise_platform(platform)
-        family = _PLATFORM_FAMILIES.get(platform, "pc")
         data = await self._get(
             "/api/stats",
             params={
                 "type": "operatorStats",
                 "nameOnPlatform": username,
                 "platformType": platform,
-                "platform_families": family,
             },
         )
 
         if not isinstance(data, dict):
             return []
 
-        # Merge lifetime rounds across all playlists per operator
-        playlists: dict = data.get("split", {}).get(family, {}).get("playlists", {})
-        merged: dict[str, dict] = {}
-        for playlist_data in playlists.values():
-            for op_data in playlist_data.get("operators", {}).values():
-                name = op_data.get("operator", "Unknown")
-                played = int(op_data["rounds"]["lifetime"].get("played", 0))
-                won    = int(op_data["rounds"]["lifetime"].get("won", 0))
-                if name not in merged:
-                    merged[name] = {"played": 0, "won": 0}
-                # Take max across playlists (avoids double-counting)
-                merged[name]["played"] = max(merged[name]["played"], played)
-                merged[name]["won"]    = max(merged[name]["won"], won)
-
+        operators_list = data.get("operators", [])
         result: list[OperatorStat] = [
             OperatorStat(
-                name=name,
-                roundsPlayed=stats["played"],
-                roundsWon=stats["won"],
-                iconUrl=f"https://r6data.eu/assets/img/operators/{urllib.parse.quote(name.lower())}.png",
+                name=op.get("operator", "Unknown"),
+                roundsPlayed=int(op.get("roundsPlayed", 0)),
+                roundsWon=int(op.get("wins", 0)),
+                iconUrl=f"https://r6data.eu/assets/img/operators/{urllib.parse.quote(op.get('operator', 'unknown').lower())}.png",
             )
-            for name, stats in merged.items()
-            if stats["played"] > 0
+            for op in operators_list
+            if int(op.get("roundsPlayed", 0)) > 0
         ]
         result.sort(key=lambda o: o.roundsPlayed, reverse=True)
         return result
