@@ -37,8 +37,6 @@ class DailyStats(BaseModel):
     kd_today: float          # Kill/death ratio for today's session
     wins: int                # Wins today
     losses: int              # Losses today
-    most_played_operator: str
-    operator_rounds: int     # Rounds played with the most-played operator today
 
 
 class CritiqueOutput(BaseModel):

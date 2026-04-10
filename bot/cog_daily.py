@@ -225,8 +225,6 @@ class DailyCog(commands.Cog, name="Daily"):
                 kd_today=_kd(kill_delta, death_delta),
                 wins=win_delta,
                 losses=loss_delta,
-                most_played_operator=most_played,
-                operator_rounds=op_rounds_day,
             )
 
             # Ask the pydantic-ai critic agent to roast this player
@@ -237,7 +235,7 @@ class DailyCog(commands.Cog, name="Daily"):
                 log.error("daily_report_job: critic agent error for %s: %s", username, exc)
                 continue
 
-            embed, ping = self._build_critique_embed(discord_id, username, daily_stats, critique)
+            embed, ping = self._build_critique_embed(discord_id, username, daily_stats, critique, most_played, op_rounds_day)
             posts.append((discord_id, username, embed, ping))
 
         # Gather all guild post-channel destinations
@@ -300,6 +298,8 @@ class DailyCog(commands.Cog, name="Daily"):
         username: str,
         stats: DailyStats,
         critique: CritiqueOutput,
+        most_played: str = "Unbekannt",
+        op_rounds: int = 0,
     ) -> tuple[discord.Embed, str]:
         """
         Build the Discord Embed for a player's daily critique.
@@ -343,7 +343,7 @@ class DailyCog(commands.Cog, name="Daily"):
         )
         embed.add_field(
             name="Operator",
-            value=f"{stats.most_played_operator} ({stats.operator_rounds} Runden)",
+            value=f"{most_played} ({op_rounds} Runden)",
             inline=True,
         )
         embed.add_field(
