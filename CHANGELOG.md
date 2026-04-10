@@ -4,6 +4,17 @@ All notable changes to this project will be documented here.
 
 ---
 
+## [Hotfix] — 10-04-2026 — v0.0.3-beta1.0
+
+### Fixed
+- **Operator-Stats API** — R6Data API hat die Response-Struktur geändert (verschachtelte `split > playlists > operators` → flaches `operators`-Array). Parsing in `r6api/client.py` angepasst, `platform_families`-Parameter entfernt.
+- **Daily Report** — Most-played Operator wird wieder korrekt im Embed angezeigt.
+
+### Changed
+- **Critic Agent** — Operator-Daten (`most_played_operator`, `operator_rounds`) aus dem AI-Kontext entfernt. Die KI bekommt keine Operator-Infos mehr, das Embed zeigt sie aber weiterhin an.
+
+---
+
 ## [Unreleased] — 03-04-2026 — v0.0.3
 
 ### Added

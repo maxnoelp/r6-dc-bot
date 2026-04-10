@@ -145,7 +145,7 @@ class AdminCog(commands.Cog, name="Admin"):
             description=(
                 f"```diff\n{status_block}\n```"
                 "```fix\n"
-                "Bot-Version: 0.0.2\n"
+                "Bot-Version: 0.0.3-beta1.0\n"
                 "Entwickelt von MaxNoelp\n"
                 "```"
             ),
