@@ -1,5 +1,7 @@
 # R6 Tracker Bot
 
+![Version](https://img.shields.io/badge/version-v0.0.3--beta1.0-blue)
+
 A Discord bot that tracks Rainbow Six Siege statistics for registered players and posts a daily AI-generated roast report every evening at 22:00.
 
 Built with **pydantic-ai + Claude (Anthropic)**, **discord.py**, **PostgreSQL**, and the [R6Data API](https://r6data.eu/api-docs).
